@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -12,7 +12,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Plus, Trash2 } from "lucide-react";
+import { Download, GripVertical, Plus, Trash2, Upload } from "lucide-react";
 import { AppNav } from "@/components/app-nav";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,8 +25,10 @@ import {
 } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useKeel } from "@/lib/keel/store";
+import { exportKeelBoard, parseKeelImport, readFileAsJson, snapshotFromState } from "@/lib/keel/io";
+import { isDoneColumn, useKeel } from "@/lib/keel/store";
 import type { KeelCard, KeelColumn } from "@/lib/keel/types";
+import { formatDayYear } from "@/lib/ledger/format";
 import { cn } from "@/lib/utils";
 
 function CardFace({ card, muted }: { card: KeelCard; muted?: boolean }) {
@@ -40,6 +42,11 @@ function CardFace({ card, muted }: { card: KeelCard; muted?: boolean }) {
       <p className="text-sm font-medium leading-snug">{card.title}</p>
       {card.note ? (
         <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{card.note}</p>
+      ) : null}
+      {card.doneAt ? (
+        <p className="mt-1.5 text-[11px] font-medium tracking-wide text-subtle">
+          Done {formatDayYear(card.doneAt)}
+        </p>
       ) : null}
     </div>
   );
@@ -160,6 +167,10 @@ function ColumnDrop({
   );
 }
 
+type EditorState =
+  | { mode: "new"; columnId: string; title: string; note: string; doneAt: string }
+  | { mode: "edit"; card: KeelCard; title: string; note: string; doneAt: string };
+
 export function KeelBoard() {
   const hydrate = useKeel((s) => s.hydrate);
   const persistOk = useKeel((s) => s.persistOk);
@@ -170,14 +181,13 @@ export function KeelBoard() {
   const updateCard = useKeel((s) => s.updateCard);
   const deleteCard = useKeel((s) => s.deleteCard);
   const moveCard = useKeel((s) => s.moveCard);
+  const replaceBoard = useKeel((s) => s.replaceBoard);
 
   const [active, setActive] = useState<KeelCard | null>(null);
-  const [editor, setEditor] = useState<
-    | { mode: "new"; columnId: string; title: string; note: string }
-    | { mode: "edit"; card: KeelCard; title: string; note: string }
-    | null
-  >(null);
+  const [editor, setEditor] = useState<EditorState | null>(null);
   const [newCol, setNewCol] = useState("");
+  const [ioMsg, setIoMsg] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useLayoutEffect(() => {
     hydrate();
@@ -196,6 +206,13 @@ export function KeelBoard() {
     }
     return map;
   }, [columns, cards]);
+
+  const editorColumn = editor
+    ? editor.mode === "new"
+      ? columns.find((c) => c.id === editor.columnId)
+      : columns.find((c) => c.id === editor.card.columnId)
+    : undefined;
+  const editorIsDone = editorColumn ? isDoneColumn(editorColumn) : Boolean(editor?.doneAt);
 
   function onDragStart(event: DragStartEvent) {
     const card = event.active.data.current?.card as KeelCard | undefined;
@@ -229,17 +246,70 @@ export function KeelBoard() {
     if (!editor) return;
     const title = editor.title.trim();
     if (!title) return;
-    if (editor.mode === "new") addCard(editor.columnId, title, editor.note);
-    else updateCard(editor.card.id, { title, note: editor.note });
+    if (editor.mode === "new") {
+      const created = addCard(editor.columnId, title, editor.note);
+      if (created && editor.doneAt) updateCard(created.id, { doneAt: editor.doneAt });
+    } else {
+      updateCard(editor.card.id, {
+        title,
+        note: editor.note,
+        doneAt: editor.doneAt || null,
+      });
+    }
     setEditor(null);
+  }
+
+  async function onExport() {
+    const result = await exportKeelBoard(snapshotFromState(columns, cards));
+    if (result === "empty") setIoMsg("Nothing to export yet.");
+    else if (result === "downloaded" || result === "shared") setIoMsg("Board exported.");
+    else setIoMsg(null);
+  }
+
+  async function onImportFile(file: File | undefined) {
+    if (!file) return;
+    try {
+      const raw = await readFileAsJson(file);
+      const snap = parseKeelImport(raw);
+      if (!replaceBoard(snap)) {
+        setIoMsg("That file is not a Keel board backup.");
+        return;
+      }
+      setIoMsg(`Imported ${snap.cards.length} cards.`);
+    } catch (err) {
+      setIoMsg(err instanceof Error ? err.message : "Could not import that file.");
+    }
   }
 
   return (
     <div className="flex min-h-dvh flex-col bg-background text-foreground">
       <header className="sticky top-0 z-30 border-b border-border bg-background">
-        <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3 sm:px-6">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <AppNav book="keel" persistOk={persistOk} />
+          <div className="flex shrink-0 items-center gap-1">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/json,.json"
+              className="sr-only"
+              onChange={(e) => {
+                void onImportFile(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+            <Button type="button" variant="ghost" size="sm" onClick={() => fileRef.current?.click()}>
+              <Upload />
+              Import
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => void onExport()}>
+              <Download />
+              Export
+            </Button>
+          </div>
         </div>
+        {ioMsg ? (
+          <p className="mx-auto max-w-6xl px-4 pb-2 text-xs text-muted-foreground sm:px-6">{ioMsg}</p>
+        ) : null}
       </header>
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-4 sm:px-6 sm:py-6">
@@ -257,11 +327,26 @@ export function KeelBoard() {
                 column={column}
                 cards={cardsByCol.get(column.id) ?? []}
                 onOpen={(card) =>
-                  setEditor({ mode: "edit", card, title: card.title, note: card.note ?? "" })
+                  setEditor({
+                    mode: "edit",
+                    card,
+                    title: card.title,
+                    note: card.note ?? "",
+                    doneAt: card.doneAt ?? "",
+                  })
                 }
-                onAdd={(columnId) =>
-                  setEditor({ mode: "new", columnId, title: "", note: "" })
-                }
+                onAdd={(columnId) => {
+                  const col = columns.find((c) => c.id === columnId);
+                  const today = new Date();
+                  const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+                  setEditor({
+                    mode: "new",
+                    columnId,
+                    title: "",
+                    note: "",
+                    doneAt: col && isDoneColumn(col) ? iso : "",
+                  });
+                }}
               />
             ))}
             <DragOverlay>
@@ -322,6 +407,17 @@ export function KeelBoard() {
                 placeholder="Optional"
               />
             </div>
+            {editorIsDone ? (
+              <div className="grid gap-1.5">
+                <Label htmlFor="card-done">Done date</Label>
+                <Input
+                  id="card-done"
+                  type="date"
+                  value={editor?.doneAt ?? ""}
+                  onChange={(e) => setEditor((cur) => (cur ? { ...cur, doneAt: e.target.value } : cur))}
+                />
+              </div>
+            ) : null}
           </div>
           <DrawerFooter>
             {editor?.mode === "edit" ? (

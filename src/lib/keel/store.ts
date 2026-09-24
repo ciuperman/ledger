@@ -4,6 +4,7 @@ import type { KeelCard, KeelColumn, KeelColumnId, KeelSnapshot } from "./types";
 const STORAGE_KEY = "keel.board.v1";
 const IDB_NAME = "ledger-app";
 const IDB_STORE = "kv";
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 const DEFAULT_COLUMNS: KeelColumn[] = [
   { id: "todo", title: "To do" },
@@ -11,19 +12,34 @@ const DEFAULT_COLUMNS: KeelColumn[] = [
   { id: "done", title: "Done" },
 ];
 
+function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export function isDoneColumn(col: Pick<KeelColumn, "id" | "title">): boolean {
+  const title = col.title.trim().toLowerCase();
+  return col.id === "done" || title === "done" || title === "terminat" || title === "finalizat";
+}
+
+function readDoneAt(value: unknown): string | undefined {
+  if (typeof value !== "string" || !ISO_DATE.test(value)) return undefined;
+  return value;
+}
+
 function emptyBoard(now = Date.now()): KeelSnapshot {
   return {
-    v: 1,
+    v: 2,
     updatedAt: now,
     columns: DEFAULT_COLUMNS.map((c) => ({ ...c })),
     cards: [],
   };
 }
 
-function asSnapshot(raw: unknown): KeelSnapshot | null {
+export function asSnapshot(raw: unknown): KeelSnapshot | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Partial<KeelSnapshot>;
-  if (o.v !== 1 || typeof o.updatedAt !== "number") return null;
+  if ((o.v !== 1 && o.v !== 2) || typeof o.updatedAt !== "number") return null;
   if (!Array.isArray(o.columns) || !Array.isArray(o.cards)) return null;
   if (o.columns.length > 24 || o.cards.length > 2000) return null;
   const columns: KeelColumn[] = [];
@@ -42,9 +58,16 @@ function asSnapshot(raw: unknown): KeelSnapshot | null {
     const title = card.title.trim().slice(0, 120);
     if (!title) continue;
     const note = typeof card.note === "string" ? card.note.trim().slice(0, 400) : undefined;
-    cards.push({ id: card.id, columnId: card.columnId, title, note: note || undefined });
+    const doneAt = readDoneAt((card as KeelCard).doneAt);
+    cards.push({
+      id: card.id,
+      columnId: card.columnId,
+      title,
+      note: note || undefined,
+      doneAt,
+    });
   }
-  return { v: 1, updatedAt: o.updatedAt, columns, cards };
+  return { v: 2, updatedAt: o.updatedAt, columns, cards };
 }
 
 function readLocal(): KeelSnapshot | null {
@@ -89,6 +112,22 @@ async function writeIdb(snap: KeelSnapshot): Promise<void> {
   }
 }
 
+function applyDoneStamp(
+  card: KeelCard,
+  columnId: KeelColumnId,
+  columns: KeelColumn[],
+): KeelCard {
+  const dest = columns.find((c) => c.id === columnId);
+  if (!dest) return card;
+  if (isDoneColumn(dest)) {
+    return { ...card, columnId, doneAt: card.doneAt ?? todayIso() };
+  }
+  if (card.columnId !== columnId) {
+    return { ...card, columnId, doneAt: undefined };
+  }
+  return { ...card, columnId };
+}
+
 type KeelState = {
   hydrated: boolean;
   persistOk: boolean;
@@ -99,15 +138,16 @@ type KeelState = {
   renameColumn: (id: KeelColumnId, title: string) => boolean;
   deleteColumn: (id: KeelColumnId) => void;
   addCard: (columnId: KeelColumnId, title: string, note?: string) => KeelCard | null;
-  updateCard: (id: string, patch: { title?: string; note?: string }) => boolean;
+  updateCard: (id: string, patch: { title?: string; note?: string; doneAt?: string | null }) => boolean;
   deleteCard: (id: string) => void;
   moveCard: (cardId: string, columnId: KeelColumnId, index: number) => void;
+  replaceBoard: (snap: KeelSnapshot) => boolean;
 };
 
 function commit(patch: Partial<Pick<KeelState, "columns" | "cards">>) {
   const current = useKeel.getState();
   const next: KeelSnapshot = {
-    v: 1,
+    v: 2,
     updatedAt: Date.now(),
     columns: patch.columns ?? current.columns,
     cards: patch.cards ?? current.cards,
@@ -153,7 +193,13 @@ export const useKeel = create<KeelState>((_set, get) => ({
     if (!cleaned) return false;
     const columns = get().columns.map((c) => (c.id === id ? { ...c, title: cleaned } : c));
     if (!columns.some((c) => c.id === id)) return false;
-    commit({ columns });
+    const dest = columns.find((c) => c.id === id)!;
+    const cards = isDoneColumn(dest)
+      ? get().cards.map((card) =>
+          card.columnId === id ? { ...card, doneAt: card.doneAt ?? todayIso() } : card,
+        )
+      : get().cards;
+    commit({ columns, cards });
     return true;
   },
 
@@ -168,11 +214,13 @@ export const useKeel = create<KeelState>((_set, get) => ({
     if (!get().columns.some((c) => c.id === columnId)) return null;
     const cleaned = title.trim().slice(0, 120);
     if (!cleaned) return null;
+    const dest = get().columns.find((c) => c.id === columnId)!;
     const row: KeelCard = {
       id: crypto.randomUUID(),
       columnId,
       title: cleaned,
       note: note?.trim().slice(0, 400) || undefined,
+      doneAt: isDoneColumn(dest) ? todayIso() : undefined,
     };
     commit({ cards: [...get().cards, row] });
     return row;
@@ -187,7 +235,11 @@ export const useKeel = create<KeelState>((_set, get) => ({
         const title = patch.title !== undefined ? patch.title.trim().slice(0, 120) : c.title;
         const note =
           patch.note !== undefined ? patch.note.trim().slice(0, 400) || undefined : c.note;
-        return { ...c, title: title || c.title, note };
+        let doneAt = c.doneAt;
+        if (patch.doneAt !== undefined) {
+          doneAt = patch.doneAt && ISO_DATE.test(patch.doneAt) ? patch.doneAt : undefined;
+        }
+        return { ...c, title: title || c.title, note, doneAt };
       }),
     });
     return true;
@@ -201,8 +253,8 @@ export const useKeel = create<KeelState>((_set, get) => ({
     const moved = get().cards.find((c) => c.id === cardId);
     if (!moved) return;
     if (!get().columns.some((c) => c.id === columnId)) return;
+    const next = applyDoneStamp(moved, columnId, get().columns);
     const without = get().cards.filter((c) => c.id !== cardId);
-    const next = { ...moved, columnId };
     const colCards = without.filter((c) => c.columnId === columnId);
     const before = colCards[index];
     if (!before) {
@@ -221,5 +273,12 @@ export const useKeel = create<KeelState>((_set, get) => ({
     const cards = [...without];
     cards.splice(at, 0, next);
     commit({ cards });
+  },
+
+  replaceBoard: (snap) => {
+    const parsed = asSnapshot(snap);
+    if (!parsed) return false;
+    commit({ columns: parsed.columns, cards: parsed.cards });
+    return true;
   },
 }));

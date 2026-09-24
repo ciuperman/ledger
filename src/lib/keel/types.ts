@@ -5,6 +5,7 @@ export type KeelCard = {
   columnId: KeelColumnId;
   title: string;
   note?: string;
+  doneAt?: string;
 };
 
 export type KeelColumn = {
@@ -13,7 +14,7 @@ export type KeelColumn = {
 };
 
 export type KeelSnapshot = {
-  v: 1;
+  v: 1 | 2;
   updatedAt: number;
   columns: KeelColumn[];
   cards: KeelCard[];
