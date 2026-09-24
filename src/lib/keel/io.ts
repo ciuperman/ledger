@@ -1,24 +1,22 @@
-import type { KeelSnapshot } from "./types";
+import { parseCsv } from "@/lib/ledger/csv";
+import type { KeelCard, KeelColumn, KeelSnapshot } from "./types";
 import { asSnapshot } from "./store";
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 function stamp(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
-function downloadFile(file: File): void {
-  const url = URL.createObjectURL(file);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = file.name;
-  a.rel = "noopener";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+export function keelExportName(): string {
+  return `keel-${stamp()}.csv`;
 }
 
-export type KeelExportResult = "empty" | "shared" | "downloaded" | "cancelled";
+function csvField(value: string): string {
+  if (/[",\r\n]/.test(value)) return `"${value.replaceAll('"', '""')}"`;
+  return value;
+}
 
 export function snapshotFromState(
   columns: KeelSnapshot["columns"],
@@ -32,23 +30,77 @@ export function snapshotFromState(
   };
 }
 
-export async function exportKeelBoard(snap: KeelSnapshot): Promise<KeelExportResult> {
-  if (snap.columns.length === 0 && snap.cards.length === 0) return "empty";
-  const file = new File([JSON.stringify(snap, null, 2)], `keel-${stamp()}.json`, {
-    type: "application/json",
-  });
-
-  try {
-    if (typeof navigator.share === "function" && navigator.canShare?.({ files: [file] })) {
-      await navigator.share({ files: [file], title: "Keel board" });
-      return "shared";
-    }
-  } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") return "cancelled";
+export function keelToCsv(snap: KeelSnapshot): string {
+  const titleOf = new Map(snap.columns.map((col) => [col.id, col.title]));
+  const order = new Map(snap.columns.map((col, index) => [col.id, index]));
+  const cards = [...snap.cards].sort(
+    (a, b) => (order.get(a.columnId) ?? 99) - (order.get(b.columnId) ?? 99),
+  );
+  const lines = ["Column,Title,Note,Done"];
+  for (const card of cards) {
+    lines.push(
+      [
+        csvField(titleOf.get(card.columnId) ?? ""),
+        csvField(card.title),
+        csvField(card.note ?? ""),
+        card.doneAt ?? "",
+      ].join(","),
+    );
   }
+  return `\uFEFF${lines.join("\r\n")}`;
+}
 
-  downloadFile(file);
-  return "downloaded";
+function headerIndex(head: string[], names: string[]): number {
+  for (const name of names) {
+    const index = head.indexOf(name);
+    if (index >= 0) return index;
+  }
+  return -1;
+}
+
+export function keelFromCsv(text: string): KeelSnapshot {
+  const rows = parseCsv(text).filter((row) => row.some((cell) => cell.trim()));
+  if (rows.length === 0) throw new Error("That CSV is empty.");
+  const head = rows[0]!.map((cell) => cell.trim().toLowerCase());
+  let start = 0;
+  let columnIndex = 0;
+  let titleIndex = 1;
+  let noteIndex = 2;
+  let doneIndex = 3;
+  if (head.includes("title") || head.includes("column")) {
+    start = 1;
+    columnIndex = headerIndex(head, ["column", "list", "status"]);
+    titleIndex = headerIndex(head, ["title", "card", "task"]);
+    noteIndex = headerIndex(head, ["note", "notes", "detail"]);
+    doneIndex = headerIndex(head, ["done", "done at", "date"]);
+    if (titleIndex < 0) throw new Error("Need a Title column.");
+  }
+  const columns: KeelColumn[] = [];
+  const columnIds = new Map<string, string>();
+  const cards: KeelCard[] = [];
+  for (const row of rows.slice(start)) {
+    const title = (row[titleIndex] ?? "").trim().slice(0, 120);
+    if (!title) continue;
+    const columnTitle = ((columnIndex >= 0 ? row[columnIndex] : "") ?? "").trim().slice(0, 40) || "To do";
+    const key = columnTitle.toLowerCase();
+    let columnId = columnIds.get(key);
+    if (!columnId) {
+      columnId = crypto.randomUUID();
+      columnIds.set(key, columnId);
+      columns.push({ id: columnId, title: columnTitle });
+    }
+    const note = noteIndex >= 0 ? (row[noteIndex] ?? "").trim().slice(0, 400) : "";
+    const doneRaw = doneIndex >= 0 ? (row[doneIndex] ?? "").trim() : "";
+    cards.push({
+      id: crypto.randomUUID(),
+      columnId,
+      title,
+      note: note || undefined,
+      doneAt: ISO_DATE.test(doneRaw) ? doneRaw : undefined,
+    });
+  }
+  if (cards.length === 0) throw new Error("No cards in that CSV.");
+  return { v: 2, updatedAt: Date.now(), columns, cards };
 }
 
 export function parseKeelImport(raw: unknown): KeelSnapshot {

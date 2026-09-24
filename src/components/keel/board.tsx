@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { exportKeelBoard, parseKeelImport, readFileAsJson, snapshotFromState } from "@/lib/keel/io";
+import { keelExportName, keelFromCsv, keelToCsv, parseKeelImport, snapshotFromState } from "@/lib/keel/io";
 import { isDoneColumn, useKeel } from "@/lib/keel/store";
 import type { KeelCard, KeelColumn } from "@/lib/keel/types";
 import { formatDayYear } from "@/lib/ledger/format";
@@ -188,6 +188,8 @@ export function KeelBoard() {
   const [newCol, setNewCol] = useState("");
   const [ioMsg, setIoMsg] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const filenameRef = useRef<HTMLInputElement>(null);
+  const csvRef = useRef<HTMLInputElement>(null);
 
   useLayoutEffect(() => {
     hydrate();
@@ -259,20 +261,57 @@ export function KeelBoard() {
     setEditor(null);
   }
 
-  async function onExport() {
-    const result = await exportKeelBoard(snapshotFromState(columns, cards));
-    if (result === "empty") setIoMsg("Nothing to export yet.");
-    else if (result === "downloaded" || result === "shared") setIoMsg("Board exported.");
-    else setIoMsg(null);
+  function onExportSubmit(event: FormEvent<HTMLFormElement>) {
+    const snap = snapshotFromState(columns, cards);
+    if (snap.cards.length === 0) {
+      event.preventDefault();
+      setIoMsg("Add a card, then export.");
+      return;
+    }
+    const csv = keelToCsv(snap);
+    const filename = keelExportName();
+    if (filenameRef.current) filenameRef.current.value = filename;
+    if (csvRef.current) csvRef.current.value = csv;
+
+    const file = new File([csv], filename, { type: "text/csv" });
+    if (typeof navigator.share === "function") {
+      let canShare = true;
+      try {
+        canShare = !navigator.canShare || navigator.canShare({ files: [file] });
+      } catch {
+        canShare = false;
+      }
+      if (canShare) {
+        event.preventDefault();
+        void navigator.share({ files: [file], title: "Keel" }).then(
+          () => setIoMsg("Choose Save to Files, or open in Numbers."),
+          (err: unknown) => {
+            if (err instanceof DOMException && err.name === "AbortError") return;
+            const url = URL.createObjectURL(file);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+            setIoMsg("CSV downloaded.");
+          },
+        );
+        return;
+      }
+    }
+    setIoMsg("Downloading CSV…");
   }
 
   async function onImportFile(file: File | undefined) {
     if (!file) return;
     try {
-      const raw = await readFileAsJson(file);
-      const snap = parseKeelImport(raw);
+      const text = await file.text();
+      const trimmed = text.replace(/^\uFEFF/, "").trim();
+      const snap = trimmed.startsWith("{") ? parseKeelImport(JSON.parse(trimmed)) : keelFromCsv(text);
       if (!replaceBoard(snap)) {
-        setIoMsg("That file is not a Keel board backup.");
+        setIoMsg("That file is not a Keel board.");
         return;
       }
       setIoMsg(`Imported ${snap.cards.length} cards.`);
@@ -284,13 +323,13 @@ export function KeelBoard() {
   return (
     <div className="flex min-h-dvh flex-col bg-background text-foreground">
       <header className="sticky top-0 z-30 border-b border-border bg-background">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-6">
           <AppNav book="keel" persistOk={persistOk} />
           <div className="flex shrink-0 items-center gap-1">
             <input
               ref={fileRef}
               type="file"
-              accept="application/json,.json"
+              accept=".csv,.json,text/csv,application/json"
               className="sr-only"
               onChange={(e) => {
                 void onImportFile(e.target.files?.[0]);
@@ -301,10 +340,14 @@ export function KeelBoard() {
               <Upload />
               Import
             </Button>
-            <Button type="button" variant="outline" size="sm" onClick={() => void onExport()}>
-              <Download />
-              Export
-            </Button>
+            <form method="post" action="/api/csv" className="inline" onSubmit={onExportSubmit}>
+              <input ref={filenameRef} type="hidden" name="filename" />
+              <input ref={csvRef} type="hidden" name="csv" />
+              <Button type="submit" variant="outline" size="sm">
+                <Download />
+                Export CSV
+              </Button>
+            </form>
           </div>
         </div>
         {ioMsg ? (

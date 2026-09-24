@@ -15,7 +15,7 @@ import {
   type LedgerFocus,
 } from "@/lib/ledger/analytics";
 import { categoryLabel, labelsEqual } from "@/lib/ledger/categories";
-import { exportTransactionsCsv, readCsvFile } from "@/lib/ledger/csv";
+import { prepareCsvExport, shareCsvFile, readCsvFile, type CsvBundle } from "@/lib/ledger/csv";
 import { isoDate } from "@/lib/ledger/format";
 import { splitRecurrences } from "@/lib/ledger/recurrence";
 import { useLedger } from "@/lib/ledger/store";
@@ -132,6 +132,7 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
   const [recurringOpen, setRecurringOpen] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
   const [csvConfirm, setCsvConfirm] = useState<{ count: number; truncated: boolean } | null>(null);
+  const [csvExport, setCsvExport] = useState<CsvBundle | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const csvRef = useRef<HTMLInputElement>(null);
   const csvFileRef = useRef<File | null>(null);
@@ -235,11 +236,24 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
     }
   }
 
-  async function onExportCsv() {
-    const result = await exportTransactionsCsv(transactions, categories, book);
-    if (result === "empty") toast.error("No transactions to export");
-    else if (result === "shared") toast.success("Share the CSV — open in Numbers");
-    else if (result === "downloaded") toast.success("CSV downloaded — open in Numbers");
+  function openCsvExport() {
+    const prepared = prepareCsvExport(transactions, categories, book);
+    if (!prepared) {
+      toast.error("No transactions to export");
+      return;
+    }
+    setCsvExport(prepared);
+  }
+
+  function closeCsvExport() {
+    setCsvExport(null);
+  }
+
+  async function onShareCsv() {
+    if (!csvExport) return;
+    const result = await shareCsvFile(csvExport.csv, csvExport.filename, "Ledger transactions");
+    if (result === "shared") toast.success("CSV file ready — save to Files or open in Numbers");
+    else if (result === "failed") toast.error("Share isn't available. Use Save CSV file.");
   }
 
   const isEmpty = transactions.length === 0;
@@ -313,12 +327,7 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel>Data</DropdownMenuLabel>
-                <DropdownMenuItem
-                  onSelect={() => {
-                    void onExportCsv();
-                  }}
-                  disabled={isEmpty}
-                >
+                <DropdownMenuItem onSelect={() => openCsvExport()}>
                   <FileSpreadsheet />
                   Export CSV
                 </DropdownMenuItem>
@@ -549,10 +558,8 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
               transactions={model.table}
               categories={categories}
               emptyHint="No transactions yet."
-              canExport={!isEmpty}
-              onExportCsv={() => {
-                void onExportCsv();
-              }}
+              canExport
+              onExportCsv={openCsvExport}
               onImportCsv={() => csvRef.current?.click()}
               onDelete={(id) => {
                 deleteTransaction(id);
@@ -593,6 +600,42 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
           defaultDate={isoDate(new Date(nowIso))}
         />
       </Suspense>
+
+      <AlertDialog
+        open={csvExport !== null}
+        onOpenChange={(open) => {
+          if (!open) closeCsvExport();
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Export CSV</AlertDialogTitle>
+            <AlertDialogDescription>
+              {csvExport?.count ?? 0} transactions as a spreadsheet file
+              {csvExport ? ` (${csvExport.filename})` : ""}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {csvExport ? (
+            <form
+              method="post"
+              action="/api/csv"
+              target="ledger-csv-frame"
+              className="mt-4 flex flex-col gap-2"
+            >
+              <input type="hidden" name="filename" value={csvExport.filename} />
+              <input type="hidden" name="csv" value={csvExport.csv} />
+              <Button type="submit">Save CSV file</Button>
+              <Button type="button" variant="outline" onClick={() => void onShareCsv()}>
+                Share file
+              </Button>
+              <iframe name="ledger-csv-frame" title="CSV download" className="hidden" />
+            </form>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel>Close</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={clearOpen} onOpenChange={setClearOpen}>
         <AlertDialogContent>

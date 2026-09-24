@@ -46,7 +46,7 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
-  if (url.pathname === "/sw.js") return;
+  if (url.pathname === "/sw.js" || url.pathname.startsWith("/api/")) return;
   if (url.searchParams.get("install") === "1") return;
 
   const isAsset = url.pathname.startsWith("/assets/");

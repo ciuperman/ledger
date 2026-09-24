@@ -64,43 +64,58 @@ function stamp(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
-function downloadFile(file: File): void {
-  const url = URL.createObjectURL(file);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = file.name;
-  a.rel = "noopener";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
-}
+export type CsvBundle = {
+  csv: string;
+  file: File;
+  filename: string;
+  count: number;
+};
 
-export type CsvExportResult = "empty" | "shared" | "downloaded" | "cancelled";
-
-export async function exportTransactionsCsv(
+export function prepareCsvExport(
   transactions: Transaction[],
   categories: Category[],
   book: BookId = "ledger",
-): Promise<CsvExportResult> {
-  if (transactions.length === 0) return "empty";
-  const csv = transactionsToCsv(transactions, categories);
-  const label = book === "keel" ? "Keel" : "Ledger";
-  const file = new File([`\uFEFF${csv}`], `${book}-transactions-${stamp()}.csv`, {
-    type: "text/csv;charset=utf-8",
-  });
+): CsvBundle | null {
+  if (transactions.length === 0) return null;
+  const csv = `\uFEFF${transactionsToCsv(transactions, categories)}`;
+  const filename = `${book}-transactions-${stamp()}.csv`;
+  const file = new File([csv], filename, { type: "text/csv" });
+  return { csv, file, filename, count: transactions.length };
+}
 
+export type CsvShareResult = "shared" | "cancelled" | "failed";
+
+const SHARE_TYPES = ["text/csv", "text/comma-separated-values", "application/vnd.ms-excel", "text/plain"];
+
+function fileShareCan(file: File): boolean {
+  if (typeof navigator.share !== "function") return false;
+  if (typeof navigator.canShare !== "function") return true;
   try {
-    if (typeof navigator.share === "function" && navigator.canShare?.({ files: [file] })) {
-      await navigator.share({ files: [file], title: `${label} transactions` });
-      return "shared";
-    }
-  } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") return "cancelled";
+    return navigator.canShare({ files: [file] });
+  } catch {
+    return false;
   }
+}
 
-  downloadFile(file);
-  return "downloaded";
+/** One file share, from a click. Never sends the spreadsheet as a text message. */
+export function shareCsvFile(csv: string, filename: string, title: string): Promise<CsvShareResult> {
+  if (typeof navigator.share !== "function") return Promise.resolve("failed");
+  let file: File | null = null;
+  for (const type of SHARE_TYPES) {
+    const candidate = new File([csv], filename, { type });
+    if (fileShareCan(candidate)) {
+      file = candidate;
+      break;
+    }
+  }
+  if (!file) return Promise.resolve("failed");
+  return navigator
+    .share({ files: [file], title })
+    .then(() => "shared" as const)
+    .catch((err: unknown) => {
+      if (err instanceof DOMException && err.name === "AbortError") return "cancelled" as const;
+      return "failed" as const;
+    });
 }
 
 function fold(value: string): string {
