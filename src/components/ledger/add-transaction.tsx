@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera, Plus } from "lucide-react";
+import { Camera, ClipboardPaste, ImageUp, Plus } from "lucide-react";
 import { isoDate } from "@/lib/ledger/format";
 import { categoriesFor, labelsEqual, normalizeLabel, payeeNames, productNames } from "@/lib/ledger/categories";
 import { useLedger } from "@/lib/ledger/store";
 import type { CategoryId, TxType } from "@/lib/ledger/types";
+import { withPreviewPrefix } from "@/lib/preview-path-prefix";
 import { Button } from "@/components/ui/button";
 import {
   Drawer,
@@ -29,6 +30,32 @@ type Draft = {
   quantity: string;
   note: string;
 };
+
+async function photoDataUrl(file: File): Promise<string> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const maxEdge = 1600;
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(8, Math.round(bitmap.width * scale));
+    const height = Math.max(8, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Could not read photo");
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close();
+    return canvas.toDataURL("image/jpeg", 0.82);
+  } catch {
+    if (file.size > 3_500_000) throw new Error("Photo is too large. Try a closer crop.");
+    const reader = new FileReader();
+    return new Promise((resolve, reject) => {
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("Could not read photo"));
+      reader.readAsDataURL(file);
+    });
+  }
+}
 
 function emptyDraft(date: string): Draft {
   return {
@@ -77,8 +104,11 @@ export function AddTransaction({
   const [newCat, setNewCat] = useState("");
   const [addingCat, setAddingCat] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [orderOpen, setOrderOpen] = useState(false);
+  const [orderText, setOrderText] = useState("");
   const newCatRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!addingCat) return;
@@ -108,6 +138,8 @@ export function AddTransaction({
     setNewCat("");
     setAddingCat(false);
     setScanning(false);
+    setOrderOpen(false);
+    setOrderText("");
   }
 
   function handleType(type: TxType) {
@@ -126,11 +158,21 @@ export function AddTransaction({
   function pickCategory(id: CategoryId) {
     const names = payeeNames(payees, draft.type, id);
     const items = productNames(products, id);
+    const listedPayees = payeeNames(payees, draft.type, draft.category);
+    const listedProducts = productNames(products, draft.category);
     setDraft((d) => ({
       ...d,
       category: id,
-      payee: names.some((n) => labelsEqual(n, d.payee)) ? d.payee : "",
-      product: items.some((n) => labelsEqual(n, d.product)) ? d.product : "",
+      payee:
+        !d.payee || !listedPayees.some((n) => labelsEqual(n, d.payee)) || names.some((n) => labelsEqual(n, d.payee))
+          ? d.payee
+          : "",
+      product:
+        !d.product ||
+        !listedProducts.some((n) => labelsEqual(n, d.product)) ||
+        items.some((n) => labelsEqual(n, d.product))
+          ? d.product
+          : "",
     }));
   }
 
@@ -153,43 +195,124 @@ export function AddTransaction({
       setError("Use a unique category name.");
       return;
     }
-    setDraft((d) => ({ ...d, category: row.id, payee: "", product: "" }));
+    if (draft.payee.trim()) ensurePayee(draft.payee, draft.type, row.id);
+    setDraft((d) => ({ ...d, category: row.id }));
     setNewCat("");
     setAddingCat(false);
     setError(null);
   }
 
+  function ensureCategory(label: string, type: TxType): string {
+    const cleaned = normalizeLabel(label).slice(0, 40);
+    if (!cleaned) return "";
+    const existing = categoriesFor(useLedger.getState().categories, type).find((c) =>
+      labelsEqual(c.label, cleaned),
+    );
+    if (existing) return existing.id;
+    return addCategory({ label: cleaned, type })?.id ?? "";
+  }
+
+  function ensurePayee(name: string, type: TxType, category: string) {
+    const cleaned = normalizeLabel(name).slice(0, 80);
+    if (!cleaned || !category) return "";
+    return addPayee(cleaned, type, category) ?? cleaned;
+  }
+
+  function applyExtracted(data: {
+    amount?: number;
+    date?: string;
+    payee?: string;
+    category?: string;
+    note?: string;
+  }) {
+    const type = draft.type;
+    const categoryId =
+      (typeof data.category === "string" && ensureCategory(data.category, type)) ||
+      draft.category ||
+      ensureCategory("Other", type);
+    const payee =
+      (typeof data.payee === "string" && ensurePayee(data.payee, type, categoryId)) || draft.payee;
+    setDraft((d) => ({
+      ...d,
+      type,
+      category: categoryId || d.category,
+      amount: data.amount != null ? String(data.amount) : d.amount,
+      date: data.date ?? d.date,
+      payee: payee || d.payee,
+      note: data.note ?? d.note,
+    }));
+    setAddingCat(false);
+    setOrderOpen(false);
+    setOrderText("");
+    const bits = [data.category, payee].filter(Boolean).join(" · ");
+    toast.success(bits ? `Added ${bits}` : "Order read");
+  }
+
+  async function readOrder(body: { image?: string; text?: string }) {
+    const res = await fetch(withPreviewPrefix("/api/scan-receipt"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...body,
+        categories: categoriesFor(useLedger.getState().categories, draft.type).map((c) => c.label),
+      }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    applyExtracted(await res.json());
+  }
+
   async function onScan(file: File) {
-    if (!file.type.startsWith("image/")) return;
+    const image =
+      file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|heic|heif)$/i.test(file.name);
+    if (!image) {
+      setError("Upload a screenshot image.");
+      return;
+    }
     setScanning(true);
     setError(null);
     try {
-      const reader = new FileReader();
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-      const res = await fetch("/api/scan-receipt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: dataUrl }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      setDraft((d) => ({
-        ...d,
-        amount: data.amount != null ? String(data.amount) : d.amount,
-        date: data.date ?? d.date,
-        payee: data.payee ?? d.payee,
-        note: data.note ?? d.note,
-      }));
-      toast.success("Receipt scanned");
+      await readOrder({ image: await photoDataUrl(file) });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Scan failed");
       toast.error("Could not read receipt");
     } finally {
       setScanning(false);
+    }
+  }
+
+  async function onPasteOrder(raw?: string) {
+    const text = (raw ?? orderText).trim();
+    if (text.length < 8) {
+      setError("Paste the order confirmation.");
+      setOrderOpen(true);
+      return;
+    }
+    setScanning(true);
+    setError(null);
+    try {
+      await readOrder({ text: text.slice(0, 12_000) });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read that order");
+      toast.error("Could not read that order");
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  async function onOrderButton() {
+    if (orderOpen && orderText.trim().length >= 8) {
+      await onPasteOrder();
+      return;
+    }
+    setOrderOpen(true);
+    try {
+      const pasted = await navigator.clipboard.readText();
+      if (pasted.trim().length >= 8) {
+        setOrderText(pasted.trim().slice(0, 12_000));
+        await onPasteOrder(pasted);
+      }
+    } catch {
+      setError(null);
     }
   }
 
@@ -200,13 +323,17 @@ export function AddTransaction({
       return;
     }
     if (!draft.payee.trim()) {
-      setError("Pick a payee from your list.");
+      setError("Add a payee.");
       return;
     }
-    if (!draft.category) {
-      setError("Pick or add a category.");
+    let category = draft.category;
+    if (!category && newCat.trim()) category = ensureCategory(newCat, draft.type);
+    if (!category) category = ensureCategory("Other", draft.type);
+    if (!category) {
+      setError("Add a category.");
       return;
     }
+    const payee = ensurePayee(draft.payee, draft.type, category);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) {
       setError("Pick a valid date.");
       return;
@@ -229,9 +356,9 @@ export function AddTransaction({
     onSubmit({
       type: draft.type,
       amount,
-      category: draft.category,
+      category,
       date: draft.date,
-      payee: draft.payee.trim(),
+      payee,
       note: draft.note.trim() || undefined,
       product,
       quantity,
@@ -282,19 +409,41 @@ export function AddTransaction({
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
             <Button
               type="button"
               variant="outline"
-              size="icon"
-              className="ml-2 shrink-0"
+              className="px-2"
+              disabled={scanning}
+              onClick={() => cameraRef.current?.click()}
+            >
+              <Camera />
+              Photo
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="px-2"
               disabled={scanning}
               onClick={() => fileRef.current?.click()}
-              aria-label="Scan receipt"
             >
-              <Camera className={scanning ? "animate-pulse" : ""} />
+              <ImageUp />
+              Screenshot
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="px-2"
+              disabled={scanning}
+              onClick={() => void onOrderButton()}
+            >
+              <ClipboardPaste />
+              Paste
             </Button>
             <input
-              ref={fileRef}
+              ref={cameraRef}
               type="file"
               accept="image/*"
               capture="environment"
@@ -305,7 +454,35 @@ export function AddTransaction({
                 if (file) void onScan(file);
               }}
             />
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*,.png,.jpg,.jpeg,.webp,.heic,.heif"
+              className="sr-only"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) void onScan(file);
+              }}
+            />
           </div>
+
+          {orderOpen ? (
+            <div className="grid gap-1.5">
+              <Label htmlFor="order-text">Online order</Label>
+              <textarea
+                id="order-text"
+                value={orderText}
+                onChange={(e) => setOrderText(e.target.value.slice(0, 12_000))}
+                placeholder="Paste the confirmation email or order page"
+                rows={4}
+                className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+              />
+              <Button type="button" size="sm" disabled={scanning} onClick={() => void onPasteOrder()}>
+                {scanning ? "Reading…" : "Read order"}
+              </Button>
+            </div>
+          ) : null}
 
           <div className="grid gap-1.5">
             <Label htmlFor="amount">Amount (RON)</Label>

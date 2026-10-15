@@ -148,5 +148,12 @@
 
 .drawer-sheet {
   bottom: var(--keyboard-inset, 0px);
-  max-height: min(90dvh, calc(100dvh - var(--keyboard-inset, 0px)));
+  max-height: min(92dvh, calc(100dvh - var(--keyboard-inset, 0px)));
+  min-height: 42dvh;
+}
+
+/* Vaul's slide keyframes stay parked off-screen in the iOS preview webview. */
+[data-vaul-drawer][data-state="open"] {
+  animation: none !important;
+  transform: translate3d(0, 0, 0) !important;
 }

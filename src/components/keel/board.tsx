@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { keelExportName, keelFromCsv, keelToCsv, parseKeelImport, snapshotFromState } from "@/lib/keel/io";
 import { isDoneColumn, useKeel } from "@/lib/keel/store";
+import { withPreviewPrefix } from "@/lib/preview-path-prefix";
 import type { KeelCard, KeelColumn } from "@/lib/keel/types";
 import { formatDayYear } from "@/lib/ledger/format";
 import { cn } from "@/lib/utils";
@@ -340,7 +341,7 @@ export function KeelBoard() {
               <Upload />
               Import
             </Button>
-            <form method="post" action="/api/csv" className="inline" onSubmit={onExportSubmit}>
+            <form method="post" action={withPreviewPrefix("/api/csv")} className="inline" onSubmit={onExportSubmit}>
               <input ref={filenameRef} type="hidden" name="filename" />
               <input ref={csvRef} type="hidden" name="csv" />
               <Button type="submit" variant="outline" size="sm">

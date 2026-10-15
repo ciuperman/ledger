@@ -17,6 +17,7 @@ import {
 import { categoryLabel, labelsEqual } from "@/lib/ledger/categories";
 import { prepareCsvExport, shareCsvFile, readCsvFile, type CsvBundle } from "@/lib/ledger/csv";
 import { isoDate } from "@/lib/ledger/format";
+import { withPreviewPrefix } from "@/lib/preview-path-prefix";
 import { splitRecurrences } from "@/lib/ledger/recurrence";
 import { useLedger } from "@/lib/ledger/store";
 import type { BookId, CategoryId } from "@/lib/ledger/types";
@@ -42,6 +43,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AppNav } from "@/components/app-nav";
+import { AddTransaction } from "./add-transaction";
 import { BudgetPanel } from "./budget-panel";
 import { CategoryTable } from "./category-table";
 import { DateRange } from "./date-range";
@@ -49,9 +51,6 @@ import { KpiGrid } from "./kpi-grid";
 import { RecurringPanel } from "./recurring-panel";
 import { TransactionsTable } from "./transactions-table";
 
-const AddTransaction = lazy(() =>
-  import("./add-transaction").then((m) => ({ default: m.AddTransaction })),
-);
 const ManageCategories = lazy(() =>
   import("./manage-categories").then((m) => ({ default: m.ManageCategories })),
 );
@@ -283,7 +282,7 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
               type="button"
               size="sm"
               className="hidden md:inline-flex"
-              onClick={() => setAddOpen(true)}
+              onClick={() => window.setTimeout(() => setAddOpen(true), 40)}
             >
               <Plus />
               Add
@@ -319,7 +318,7 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onSelect={() => {
-                    window.location.assign("/?install=1&platform=ios");
+                    window.location.assign(withPreviewPrefix("/?install=1&platform=ios"));
                   }}
                 >
                   <Smartphone />
@@ -424,12 +423,12 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => window.location.assign("/?install=1&platform=ios")}
+                onClick={() => window.location.assign(withPreviewPrefix("/?install=1&platform=ios"))}
               >
                 <Smartphone />
                 Add to iPhone
               </Button>
-              <Button type="button" size="sm" onClick={() => setAddOpen(true)}>
+              <Button type="button" size="sm" onClick={() => window.setTimeout(() => setAddOpen(true), 40)}>
                 <Plus />
                 Add transaction
               </Button>
@@ -571,23 +570,21 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
       </main>
 
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-background p-3 safe-bottom md:hidden">
-        <Button type="button" className="w-full" onClick={() => setAddOpen(true)}>
+        <Button type="button" className="w-full" onClick={() => window.setTimeout(() => setAddOpen(true), 40)}>
           <Plus />
           Add transaction
         </Button>
       </div>
 
-      <Suspense fallback={null}>
-        <AddTransaction
-          open={addOpen}
-          onOpenChange={setAddOpen}
-          defaultDate={isoDate(new Date(nowIso))}
-          onSubmit={(input) => {
-            addTransaction(input);
-            toast.success("Transaction saved");
-          }}
-        />
-      </Suspense>
+      <AddTransaction
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        defaultDate={isoDate(new Date(nowIso))}
+        onSubmit={(input) => {
+          addTransaction(input);
+          toast.success("Transaction saved");
+        }}
+      />
 
       <Suspense fallback={null}>
         <ManageCategories open={catsOpen} onOpenChange={setCatsOpen} />
@@ -618,7 +615,7 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
           {csvExport ? (
             <form
               method="post"
-              action="/api/csv"
+              action={withPreviewPrefix("/api/csv")}
               target="ledger-csv-frame"
               className="mt-4 flex flex-col gap-2"
             >

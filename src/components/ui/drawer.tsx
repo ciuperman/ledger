@@ -54,11 +54,19 @@ function useLiftForKeyboard(ref: React.RefObject<HTMLElement | null>) {
     const apply = () => {
       const el = ref.current;
       if (!el) return;
+      // Ignore a bogus viewport (common in the iOS preview). A 0 height
+      // was collapsing the sheet so Add looked like a dead button.
+      if (vv.height < 160) {
+        el.style.removeProperty("--keyboard-inset");
+        el.style.maxHeight = "";
+        el.style.marginTop = "";
+        return;
+      }
       const inset = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-      const keyboard = inset > 80 ? inset : 0;
+      const keyboard = inset > 140 ? inset : 0;
       el.style.setProperty("--keyboard-inset", `${keyboard}px`);
       if (keyboard > 0) {
-        el.style.maxHeight = `${Math.round(vv.height)}px`;
+        el.style.maxHeight = `${Math.max(240, Math.round(vv.height - 12))}px`;
         el.style.marginTop = "0px";
       } else {
         el.style.maxHeight = "";

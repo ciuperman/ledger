@@ -1,66 +1,140 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { z } from "zod";
 
-const Receipt = z.object({
-  amount: z.number().positive().optional(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  payee: z.string().max(80).optional(),
-  note: z.string().max(160).optional(),
-  currency: z.string().optional(),
-});
+const MAX_IMAGE_CHARS = 8_000_000;
+const MAX_TEXT_CHARS = 12_000;
+
+function normalizeAmount(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0 && value < 1_000_000_000) {
+    return Math.round(value * 100) / 100;
+  }
+  if (typeof value !== "string") return undefined;
+  let s = value.trim().replace(/\s/g, "");
+  if (s.includes(",") && s.includes(".")) {
+    if (s.lastIndexOf(",") > s.lastIndexOf(".")) s = s.replace(/\./g, "").replace(",", ".");
+    else s = s.replace(/,/g, "");
+  } else if (s.includes(",")) {
+    s = s.replace(",", ".");
+  }
+  const n = Number(s.replace(/[^\d.-]/g, ""));
+  if (!Number.isFinite(n) || n <= 0 || n >= 1_000_000_000) return undefined;
+  return Math.round(n * 100) / 100;
+}
+
+function normalizeDate(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const iso = value.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const dmy = value.match(/(\d{1,2})[./](\d{1,2})[./](\d{4})/);
+  if (!dmy) return undefined;
+  return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+}
+
+function clip(value: unknown, max: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.replace(/\s+/g, " ").trim().slice(0, max);
+  return text || undefined;
+}
+
+function parseModelJson(text: string): unknown {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  return JSON.parse(fenced?.[1] ?? trimmed);
+}
+
+const ORDER_RULES =
+  "This may be a paper receipt or an online order (email, eMAG, Amazon, or a shop page). Use the amount actually paid, not a subtotal, when both appear. Dates may be YYYY-MM-DD or DD.MM.YYYY. Amounts may use a comma decimal (RON or EUR — convert nothing, keep the charged number). Payee is the shop. Category is 1-2 words. Note can include the order number.";
+
+async function completeOrder(
+  key: string,
+  model: string,
+  categories: string[],
+  userContent: unknown,
+): Promise<Response> {
+  const known = categories.length
+    ? `Reuse one of these categories when it fits: ${categories.join(", ")}.`
+    : "Otherwise invent a short 1-2 word category.";
+  return fetch("https://api.x.ai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: "system",
+          content: `${ORDER_RULES} ${known} Reply with only JSON: {"amount": number, "date": string, "payee": string, "category": string, "note": string}.`,
+        },
+        { role: "user", content: userContent },
+      ],
+      response_format: { type: "json_object" },
+      max_tokens: 300,
+    }),
+  });
+}
 
 export const Route = createFileRoute("/api/scan-receipt")({
   server: {
     handlers: {
       POST: async ({ request }) => {
         const key = process.env.XAI_API_KEY;
-        if (!key) return new Response("Vision not configured", { status: 503 });
+        if (!key) return new Response("Receipt scan is unavailable.", { status: 503 });
 
         const body = await request.json().catch(() => null);
         const image = typeof body?.image === "string" ? body.image : "";
-        if (!image.startsWith("data:image/")) {
-          return new Response("Image required", { status: 400 });
+        const orderText = typeof body?.text === "string" ? body.text.trim() : "";
+        const categories = Array.isArray(body?.categories)
+          ? body.categories
+              .filter((name: unknown): name is string => typeof name === "string")
+              .map((name: string) => name.slice(0, 40))
+              .slice(0, 40)
+          : [];
+        if (!image && orderText.length < 8) {
+          return new Response("Photo or order text required.", { status: 400 });
+        }
+        if (image && !image.startsWith("data:image/")) {
+          return new Response("Photo required.", { status: 400 });
+        }
+        if (image.length > MAX_IMAGE_CHARS || orderText.length > MAX_TEXT_CHARS) {
+          return new Response("That is too large. Paste only the order total.", { status: 413 });
         }
 
-        const res = await fetch("https://api.x.ai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${key}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "grok-4",
-            messages: [
-              {
-                role: "system",
-                content: "Extract the total amount (number), date (YYYY-MM-DD), merchant/payee name, and a short note from this receipt. Currency is usually RON. Reply with only valid JSON matching the schema."
-              },
-              {
-                role: "user",
-                content: [
-                  { type: "text", text: "Extract receipt data." },
-                  { type: "image_url", image_url: { url: image, detail: "high" } }
-                ]
-              }
-            ],
-            response_format: { type: "json_object" },
-            max_tokens: 300,
-          }),
-        });
+        const userContent = image
+          ? [
+              { type: "text", text: "Extract the receipt or online order." },
+              { type: "image_url", image_url: { url: image, detail: "high" } },
+            ]
+          : `Extract this online order confirmation:\n${orderText.slice(0, MAX_TEXT_CHARS)}`;
 
-        if (!res.ok) {
-          return new Response("Scan failed", { status: 502 });
+        let res = await completeOrder(key, "grok-4.5", categories, userContent);
+        if (res.status === 429 || res.status === 503 || res.status === 404) {
+          res = await completeOrder(key, "grok-4", categories, userContent);
         }
+        if (res.status === 429 || res.status === 503) {
+          return new Response("Scanner is busy. Try again in a minute.", { status: 503 });
+        }
+        if (!res.ok) return new Response("Could not read that order.", { status: 502 });
 
-        const data = await res.json();
-        const text = data.choices?.[0]?.message?.content ?? "{}";
-        let parsed;
+        const data = await res.json().catch(() => null);
+        const text = data?.choices?.[0]?.message?.content ?? "";
+        let raw: unknown;
         try {
-          parsed = Receipt.parse(JSON.parse(text));
+          raw = parseModelJson(typeof text === "string" ? text : "{}");
         } catch {
-          return new Response("Could not parse receipt", { status: 422 });
+          return new Response("Could not read that order.", { status: 422 });
         }
-
+        const row = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+        const parsed = {
+          amount: normalizeAmount(row.amount ?? row.total),
+          date: normalizeDate(row.date),
+          payee: clip(row.payee ?? row.merchant ?? row.vendor, 80),
+          category: clip(row.category, 40),
+          note: clip(row.note, 160),
+        };
+        if (!parsed.amount && !parsed.payee && !parsed.date && !parsed.category) {
+          return new Response("No amount or shop name on that order.", { status: 422 });
+        }
         return Response.json(parsed);
       },
     },
