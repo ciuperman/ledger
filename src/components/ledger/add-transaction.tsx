@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Plus } from "lucide-react";
+import { Camera, Plus } from "lucide-react";
 import { isoDate } from "@/lib/ledger/format";
 import { categoriesFor, labelsEqual, normalizeLabel, payeeNames, productNames } from "@/lib/ledger/categories";
 import { useLedger } from "@/lib/ledger/store";
@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { PayeePicker } from "./payee-picker";
+import { toast } from "sonner";
 
 type Draft = {
   type: TxType;
@@ -75,7 +76,9 @@ export function AddTransaction({
   const [error, setError] = useState<string | null>(null);
   const [newCat, setNewCat] = useState("");
   const [addingCat, setAddingCat] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const newCatRef = useRef<HTMLInputElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!addingCat) return;
@@ -104,6 +107,7 @@ export function AddTransaction({
     setError(null);
     setNewCat("");
     setAddingCat(false);
+    setScanning(false);
   }
 
   function handleType(type: TxType) {
@@ -153,6 +157,40 @@ export function AddTransaction({
     setNewCat("");
     setAddingCat(false);
     setError(null);
+  }
+
+  async function onScan(file: File) {
+    if (!file.type.startsWith("image/")) return;
+    setScanning(true);
+    setError(null);
+    try {
+      const reader = new FileReader();
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const res = await fetch("/api/scan-receipt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: dataUrl }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      setDraft((d) => ({
+        ...d,
+        amount: data.amount != null ? String(data.amount) : d.amount,
+        date: data.date ?? d.date,
+        payee: data.payee ?? d.payee,
+        note: data.note ?? d.note,
+      }));
+      toast.success("Receipt scanned");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Scan failed");
+      toast.error("Could not read receipt");
+    } finally {
+      setScanning(false);
+    }
   }
 
   function submit() {
@@ -226,22 +264,47 @@ export function AddTransaction({
             submit();
           }}
         >
-          <div className="flex rounded-xl bg-muted p-1">
-            {(["expense", "income"] as const).map((type) => (
-              <button
-                key={type}
-                type="button"
-                onClick={() => handleType(type)}
-                className={cn(
-                  "h-11 min-h-11 flex-1 rounded-lg text-sm font-medium capitalize transition-colors duration-150",
-                  draft.type === type
-                    ? "bg-card text-foreground shadow-[var(--shadow-border)]"
-                    : "text-muted-foreground",
-                )}
-              >
-                {type}
-              </button>
-            ))}
+          <div className="flex items-center justify-between">
+            <div className="flex rounded-xl bg-muted p-1 flex-1">
+              {(["expense", "income"] as const).map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => handleType(type)}
+                  className={cn(
+                    "h-11 min-h-11 flex-1 rounded-lg text-sm font-medium capitalize transition-colors duration-150",
+                    draft.type === type
+                      ? "bg-card text-foreground shadow-[var(--shadow-border)]"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="ml-2 shrink-0"
+              disabled={scanning}
+              onClick={() => fileRef.current?.click()}
+              aria-label="Scan receipt"
+            >
+              <Camera className={scanning ? "animate-pulse" : ""} />
+            </Button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="sr-only"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) void onScan(file);
+              }}
+            />
           </div>
 
           <div className="grid gap-1.5">
@@ -387,8 +450,8 @@ export function AddTransaction({
           {error ? <p className="text-sm text-expense">{error}</p> : null}
         </form>
         <DrawerFooter>
-          <Button type="button" onClick={submit}>
-            Save transaction
+          <Button type="button" onClick={submit} disabled={scanning}>
+            {scanning ? "Scanning…" : "Save transaction"}
           </Button>
         </DrawerFooter>
       </DrawerContent>
