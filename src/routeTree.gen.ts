@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as KeelRouteImport } from './routes/keel'
 import { Route as ApiCsvRouteImport } from './routes/api/csv'
+import { Route as ApiScanReceiptRouteImport } from './routes/api/scan-receipt'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,35 +29,44 @@ const ApiCsvRoute = ApiCsvRouteImport.update({
   path: '/api/csv',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiScanReceiptRoute = ApiScanReceiptRouteImport.update({
+  id: '/api/scan-receipt',
+  path: '/api/scan-receipt',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/keel': typeof KeelRoute
   '/api/csv': typeof ApiCsvRoute
+  '/api/scan-receipt': typeof ApiScanReceiptRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/keel': typeof KeelRoute
   '/api/csv': typeof ApiCsvRoute
+  '/api/scan-receipt': typeof ApiScanReceiptRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/keel': typeof KeelRoute
   '/api/csv': typeof ApiCsvRoute
+  '/api/scan-receipt': typeof ApiScanReceiptRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/keel' | '/api/csv'
+  fullPaths: '/' | '/keel' | '/api/csv' | '/api/scan-receipt'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/keel' | '/api/csv'
-  id: '__root__' | '/' | '/keel' | '/api/csv'
+  to: '/' | '/keel' | '/api/csv' | '/api/scan-receipt'
+  id: '__root__' | '/' | '/keel' | '/api/csv' | '/api/scan-receipt'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   KeelRoute: typeof KeelRoute
   ApiCsvRoute: typeof ApiCsvRoute
+  ApiScanReceiptRoute: typeof ApiScanReceiptRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +92,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCsvRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/scan-receipt': {
+      id: '/api/scan-receipt'
+      path: '/api/scan-receipt'
+      fullPath: '/api/scan-receipt'
+      preLoaderRoute: typeof ApiScanReceiptRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,6 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   KeelRoute: KeelRoute,
   ApiCsvRoute: ApiCsvRoute,
+  ApiScanReceiptRoute: ApiScanReceiptRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
