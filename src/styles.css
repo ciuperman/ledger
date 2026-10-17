@@ -157,3 +157,26 @@
   animation: none !important;
   transform: translate3d(0, 0, 0) !important;
 }
+
+[data-sonner-toaster] {
+  display: none !important;
+}
+
+[data-sonner-toast] {
+  background: #16191e !important;
+  color: #e8eaed !important;
+  border: 1px solid rgb(255 255 255 / 0.18) !important;
+  opacity: 1 !important;
+}
+
+[data-sonner-toast][data-type="error"] {
+  background: #3a2422 !important;
+  color: #f6ddd9 !important;
+  border-color: #c08984 !important;
+}
+
+[data-sonner-toast][data-type="success"] {
+  background: #1c2822 !important;
+  color: #e7f2ea !important;
+  border-color: #8fa89a !important;
+}

@@ -1,4 +1,4 @@
-export const RANGE_PRESETS = ["7d", "30d", "90d", "6m", "1y"] as const;
+export const RANGE_PRESETS = ["7d", "30d", "90d", "6m", "1y", "2y"] as const;
 export type RangePreset = (typeof RANGE_PRESETS)[number];
 
 export const BOOKS = ["ledger", "keel"] as const;
@@ -19,6 +19,12 @@ export type Category = {
   color: string;
 };
 
+export type ReceiptItem = {
+  name: string;
+  quantity?: number;
+  price?: number;
+};
+
 export type Transaction = {
   id: string;
   type: TxType;
@@ -29,6 +35,7 @@ export type Transaction = {
   note?: string;
   product?: string;
   quantity?: number;
+  items?: ReceiptItem[];
 };
 
 export type Budget = {

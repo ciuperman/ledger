@@ -112,6 +112,9 @@ export function windowFor(preset: RangePreset, now = new Date()): DateWindow {
     case "1y":
       start = startOfDay(subYears(now, 1));
       break;
+    case "2y":
+      start = startOfDay(subYears(now, 2));
+      break;
   }
   const days = differenceInCalendarDays(end, start);
   const priorEnd = endOfDay(subDays(start, 1));
@@ -184,7 +187,8 @@ export function searchTransactions(
   return txs.filter((t) => {
     if (typeFilter !== "all" && t.type !== typeFilter) return false;
     if (!q) return true;
-    const hay = `${t.payee} ${t.product ?? ""} ${t.note ?? ""} ${categoryLabel(t.category, categories)}`.toLowerCase();
+    const items = t.items?.map((item) => item.name).join(" ") ?? "";
+    const hay = `${t.payee} ${t.product ?? ""} ${items} ${t.note ?? ""} ${categoryLabel(t.category, categories)}`.toLowerCase();
     return hay.includes(q);
   });
 }
@@ -469,4 +473,5 @@ export const RANGE_LABELS: Record<RangePreset, string> = {
   "90d": "90D",
   "6m": "6M",
   "1y": "1Y",
+  "2y": "2Y",
 };

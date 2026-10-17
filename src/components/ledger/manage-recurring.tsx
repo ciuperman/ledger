@@ -433,10 +433,13 @@ export function ManageRecurring({
                     maxLength={160}
                   />
                 </div>
-
-                {error ? <p className="text-sm text-expense">{error}</p> : null}
               </form>
               <DrawerFooter>
+                {error ? (
+                  <p role="alert" className="rounded-lg border border-[#c08984] bg-[#3a2422] px-3 py-2 text-sm text-[#f6ddd9]">
+                    {error}
+                  </p>
+                ) : null}
                 <Button type="button" onClick={submit}>
                   {editingId ? "Save changes" : "Save recurring"}
                 </Button>

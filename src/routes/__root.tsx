@@ -40,8 +40,12 @@ export const Route = createRootRoute({
             <Toaster
               theme="dark"
               position="top-center"
+              duration={12000}
+              offset={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
+              mobileOffset={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
               toastOptions={{
-                className: "font-sans",
+                className:
+                  "!bg-[#16191e] !text-[#e8eaed] !border !border-white/20 !shadow-lg",
               }}
             />
           </TooltipProvider>

@@ -260,17 +260,51 @@ function readQuantity(value: unknown): number | undefined {
   return Math.round(value * 1000) / 1000;
 }
 
+function readItems(value: unknown): Transaction["items"] {
+  if (!Array.isArray(value)) return undefined;
+  const items: NonNullable<Transaction["items"]> = [];
+  for (const row of value) {
+    if (!row || typeof row !== "object") continue;
+    const record = row as { name?: unknown; quantity?: unknown; price?: unknown };
+    if (typeof record.name !== "string") continue;
+    const name = normalizeLabel(record.name).slice(0, 80);
+    if (!name) continue;
+    const quantity = readQuantity(record.quantity);
+    const price =
+      typeof record.price === "number" && Number.isFinite(record.price) && record.price >= 0
+        ? Math.round(record.price * 100) / 100
+        : undefined;
+    items.push({ name, quantity, price });
+    if (items.length >= 40) break;
+  }
+  return items.length > 0 ? items : undefined;
+}
+
+export function receiptDate(iso: string, today = new Date()): string {
+  const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return iso;
+  const year = Number(match[1]);
+  const current = today.getFullYear();
+  if (year !== current - 1) return iso;
+  const shifted = `${current}-${match[2]}-${match[3]}`;
+  const time = new Date(`${shifted}T12:00:00`).getTime();
+  const endToday = new Date(current, today.getMonth(), today.getDate(), 23, 59, 59).getTime();
+  return time <= endToday ? shifted : iso;
+}
+
 function readTransactions(rows: Transaction[]): Transaction[] {
   return rows.map((t) => {
+    const items = readItems(t.items);
     if (t.type !== "income") {
       return {
         id: t.id,
         type: t.type,
         amount: t.amount,
         category: t.category,
-        date: t.date,
+        date: receiptDate(t.date),
         payee: t.payee,
         note: t.note,
+        items,
       };
     }
     const product = t.product ? normalizeLabel(t.product).slice(0, 80) : undefined;
@@ -278,6 +312,8 @@ function readTransactions(rows: Transaction[]): Transaction[] {
       ...t,
       product: product || undefined,
       quantity: readQuantity(t.quantity),
+      date: receiptDate(t.date),
+      items,
     };
   });
 }

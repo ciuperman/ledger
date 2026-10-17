@@ -3,7 +3,7 @@ import { Camera, ClipboardPaste, ImageUp, Plus } from "lucide-react";
 import { isoDate } from "@/lib/ledger/format";
 import { categoriesFor, labelsEqual, normalizeLabel, payeeNames, productNames } from "@/lib/ledger/categories";
 import { useLedger } from "@/lib/ledger/store";
-import type { CategoryId, TxType } from "@/lib/ledger/types";
+import type { CategoryId, ReceiptItem, TxType } from "@/lib/ledger/types";
 import { withPreviewPrefix } from "@/lib/preview-path-prefix";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,31 +29,64 @@ type Draft = {
   product: string;
   quantity: string;
   note: string;
+  items: ReceiptItem[];
 };
 
+function keepThisYear(iso: string): string {
+  const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return iso;
+  const year = Number(match[1]);
+  const current = new Date().getFullYear();
+  if (year !== current - 1) return iso;
+  const shifted = `${current}-${match[2]}-${match[3]}`;
+  const time = new Date(`${shifted}T12:00:00`).getTime();
+  const endToday = new Date();
+  endToday.setHours(23, 59, 59, 999);
+  return time <= endToday.getTime() ? shifted : iso;
+}
+
 async function photoDataUrl(file: File): Promise<string> {
+  const bitmap = await loadBitmap(file);
   try {
-    const bitmap = await createImageBitmap(file);
-    const maxEdge = 1600;
-    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
-    const width = Math.max(8, Math.round(bitmap.width * scale));
-    const height = Math.max(8, Math.round(bitmap.height * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Could not read photo");
-    ctx.drawImage(bitmap, 0, 0, width, height);
+    let width = Math.min(bitmap.width, 900);
+    let url = "";
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const scale = width / bitmap.width;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(8, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(8, Math.round(bitmap.height * scale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Could not read photo");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      url = canvas.toDataURL("image/jpeg", 0.62);
+      if (url.length <= 420_000) return url;
+      width = Math.round(width * 0.75);
+    }
+    if (url.length > 480_000) throw new Error("Photo is too large. Keep the product lines in the crop.");
+    return url;
+  } finally {
     bitmap.close();
-    return canvas.toDataURL("image/jpeg", 0.82);
+  }
+}
+
+async function loadBitmap(file: File): Promise<ImageBitmap> {
+  try {
+    return await createImageBitmap(file);
   } catch {
-    if (file.size > 3_500_000) throw new Error("Photo is too large. Try a closer crop.");
-    const reader = new FileReader();
-    return new Promise((resolve, reject) => {
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error("Could not read photo"));
-      reader.readAsDataURL(file);
-    });
+    const url = URL.createObjectURL(file);
+    try {
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error("Could not read photo"));
+        el.src = url;
+      });
+      return await createImageBitmap(image);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   }
 }
 
@@ -67,6 +100,7 @@ function emptyDraft(date: string): Draft {
     product: "",
     quantity: "1",
     note: "",
+    items: [],
   };
 }
 
@@ -87,6 +121,7 @@ export function AddTransaction({
     note?: string;
     product?: string;
     quantity?: number;
+    items?: ReceiptItem[];
   }) => void;
   defaultDate?: string;
 }) {
@@ -106,6 +141,7 @@ export function AddTransaction({
   const [scanning, setScanning] = useState(false);
   const [orderOpen, setOrderOpen] = useState(false);
   const [orderText, setOrderText] = useState("");
+  const [scanned, setScanned] = useState<string | null>(null);
   const newCatRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -140,6 +176,7 @@ export function AddTransaction({
     setScanning(false);
     setOrderOpen(false);
     setOrderText("");
+    setScanned(null);
   }
 
   function handleType(type: TxType) {
@@ -179,7 +216,7 @@ export function AddTransaction({
   function createCategory() {
     const cleaned = normalizeLabel(newCat);
     if (!cleaned) {
-      setError("Name the category.");
+      fail("Name the category.");
       return;
     }
     const existing = cats.find((c) => labelsEqual(c.label, cleaned));
@@ -192,7 +229,7 @@ export function AddTransaction({
     }
     const row = addCategory({ label: cleaned, type: draft.type });
     if (!row) {
-      setError("Use a unique category name.");
+      fail("Use a unique category name.");
       return;
     }
     if (draft.payee.trim()) ensurePayee(draft.payee, draft.type, row.id);
@@ -224,28 +261,46 @@ export function AddTransaction({
     payee?: string;
     category?: string;
     note?: string;
+    items?: ReceiptItem[];
   }) {
     const type = draft.type;
     const categoryId =
       (typeof data.category === "string" && ensureCategory(data.category, type)) ||
       draft.category ||
-      ensureCategory("Other", type);
+      (typeof data.payee === "string" || data.amount != null ? ensureCategory("Other", type) : "");
     const payee =
       (typeof data.payee === "string" && ensurePayee(data.payee, type, categoryId)) || draft.payee;
+    const date = keepThisYear(
+      typeof data.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.date) ? data.date : draft.date,
+    );
+    const amount = typeof data.amount === "number" && data.amount > 0 ? String(data.amount) : "";
+    const items = Array.isArray(data.items) ? data.items.filter((item) => item.name).slice(0, 30) : [];
     setDraft((d) => ({
       ...d,
       type,
       category: categoryId || d.category,
-      amount: data.amount != null ? String(data.amount) : d.amount,
-      date: data.date ?? d.date,
+      amount: amount || d.amount,
+      date,
       payee: payee || d.payee,
       note: data.note ?? d.note,
+      items,
     }));
     setAddingCat(false);
     setOrderOpen(false);
     setOrderText("");
-    const bits = [data.category, payee].filter(Boolean).join(" · ");
-    toast.success(bits ? `Added ${bits}` : "Order read");
+    const summary = [
+      amount ? `${amount} RON` : "no total",
+      payee || "no shop",
+      items.length ? `${items.length} products` : "no product lines",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    setScanned(summary);
+    if (!amount) {
+      fail("Couldn't read the total. The other fields are filled in.");
+      return;
+    }
+    setError(null);
   }
 
   async function readOrder(body: { image?: string; text?: string }) {
@@ -257,7 +312,16 @@ export function AddTransaction({
         categories: categoriesFor(useLedger.getState().categories, draft.type).map((c) => c.label),
       }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      const raw = await res.text();
+      if (res.status === 502 || res.status === 503 || res.status === 504) {
+        throw new Error("Server is busy. Try again in a minute.");
+      }
+      const flat = raw.replace(/\s+/g, " ").trim();
+      throw new Error(
+        !flat || flat.length > 180 || /<\/?[a-z!]/i.test(flat) ? "Could not read that." : flat,
+      );
+    }
     applyExtracted(await res.json());
   }
 
@@ -265,7 +329,7 @@ export function AddTransaction({
     const image =
       file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|heic|heif)$/i.test(file.name);
     if (!image) {
-      setError("Upload a screenshot image.");
+      fail("Upload a screenshot image.");
       return;
     }
     setScanning(true);
@@ -273,8 +337,7 @@ export function AddTransaction({
     try {
       await readOrder({ image: await photoDataUrl(file) });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Scan failed");
-      toast.error("Could not read receipt");
+      fail(err instanceof Error ? err.message : "Scan failed");
     } finally {
       setScanning(false);
     }
@@ -283,7 +346,7 @@ export function AddTransaction({
   async function onPasteOrder(raw?: string) {
     const text = (raw ?? orderText).trim();
     if (text.length < 8) {
-      setError("Paste the order confirmation.");
+      fail("Paste the order confirmation.");
       setOrderOpen(true);
       return;
     }
@@ -292,8 +355,7 @@ export function AddTransaction({
     try {
       await readOrder({ text: text.slice(0, 12_000) });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not read that order");
-      toast.error("Could not read that order");
+      fail(err instanceof Error ? err.message : "Could not read that order");
     } finally {
       setScanning(false);
     }
@@ -316,26 +378,31 @@ export function AddTransaction({
     }
   }
 
+  function fail(message: string) {
+    setError(message);
+    toast.error(message);
+  }
+
   function submit() {
     const amount = Number(draft.amount.replace(",", "."));
     if (!Number.isFinite(amount) || amount <= 0) {
-      setError("Enter an amount greater than zero.");
+      fail("Enter an amount greater than zero.");
       return;
     }
     if (!draft.payee.trim()) {
-      setError("Add a payee.");
+      fail("Add a payee.");
       return;
     }
     let category = draft.category;
     if (!category && newCat.trim()) category = ensureCategory(newCat, draft.type);
     if (!category) category = ensureCategory("Other", draft.type);
     if (!category) {
-      setError("Add a category.");
+      fail("Add a category.");
       return;
     }
     const payee = ensurePayee(draft.payee, draft.type, category);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) {
-      setError("Pick a valid date.");
+      fail("Pick a valid date.");
       return;
     }
     let product: string | undefined;
@@ -343,13 +410,13 @@ export function AddTransaction({
     if (draft.type === "income") {
       product = draft.product.trim();
       if (!product) {
-        setError("Pick a product from your list.");
+        fail("Pick a product from your list.");
         return;
       }
       const qtyRaw = draft.quantity.trim() || "1";
       quantity = Number(qtyRaw.replace(",", "."));
       if (!Number.isFinite(quantity) || quantity <= 0) {
-        setError("Enter a quantity greater than zero.");
+        fail("Enter a quantity greater than zero.");
         return;
       }
     }
@@ -362,6 +429,7 @@ export function AddTransaction({
       note: draft.note.trim() || undefined,
       product,
       quantity,
+      items: draft.items.length > 0 ? draft.items : undefined,
     });
     reset();
     onOpenChange(false);
@@ -382,7 +450,7 @@ export function AddTransaction({
       <DrawerContent>
         <DrawerHeader>
           <DrawerTitle>Add transaction</DrawerTitle>
-          <DrawerDescription>Saved on this device only.</DrawerDescription>
+          <DrawerDescription>Check the scan, then save. Nothing is stored until you do.</DrawerDescription>
         </DrawerHeader>
         <form
           className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5"
@@ -391,6 +459,29 @@ export function AddTransaction({
             submit();
           }}
         >
+          {scanned ? (
+            <p
+              role="status"
+              className="rounded-lg border border-[#8fa89a] bg-[#1c2822] px-3 py-2 text-sm text-[#e7f2ea]"
+            >
+              Scanned: {scanned}
+            </p>
+          ) : null}
+          {draft.items.length > 0 ? (
+            <ul className="divide-y divide-border rounded-lg border border-border px-3">
+              {draft.items.map((item, index) => (
+                <li key={`${item.name}-${index}`} className="flex items-baseline justify-between gap-3 py-2 text-sm">
+                  <span className="min-w-0">
+                    {item.quantity != null ? `${item.quantity} × ` : ""}
+                    {item.name}
+                  </span>
+                  <span className="shrink-0 font-mono tabular-nums text-muted-foreground">
+                    {item.price != null ? item.price.toFixed(2) : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
           <div className="flex items-center justify-between">
             <div className="flex rounded-xl bg-muted p-1 flex-1">
               {(["expense", "income"] as const).map((type) => (
@@ -623,10 +714,13 @@ export function AddTransaction({
               maxLength={160}
             />
           </div>
-
-          {error ? <p className="text-sm text-expense">{error}</p> : null}
         </form>
         <DrawerFooter>
+          {error ? (
+            <p role="alert" className="rounded-lg border border-[#c08984] bg-[#3a2422] px-3 py-2 text-sm text-[#f6ddd9]">
+              {error}
+            </p>
+          ) : null}
           <Button type="button" onClick={submit} disabled={scanning}>
             {scanning ? "Scanning…" : "Save transaction"}
           </Button>

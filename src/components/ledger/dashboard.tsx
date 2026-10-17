@@ -112,6 +112,7 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
   const recurrences = useLedger((s) => s.recurrences);
   const range = useLedger((s) => s.range);
   const setRange = useLedger((s) => s.setRange);
+  const repairReceiptYears = useLedger((s) => s.repairReceiptYears);
   const persistOk = useLedger((s) => s.persistOk);
   const addTransaction = useLedger((s) => s.addTransaction);
   const deleteTransaction = useLedger((s) => s.deleteTransaction);
@@ -148,6 +149,10 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
   }, [hydrate, book]);
 
   useEffect(() => {
+    if (hydrated) repairReceiptYears();
+  }, [hydrated, repairReceiptYears]);
+
+  useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
     const boot = () => {
       void navigator.serviceWorker.register("/sw.js").catch(() => undefined);
@@ -172,7 +177,6 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
   const model = useMemo(() => {
     const win = windowFor(range);
     const scoped = filterFocused(transactions, focus);
-    const inRange = scoped.filter((t) => inWindow(t, win.start, win.end));
     const now = new Date(nowIso);
     return {
       win,
@@ -183,7 +187,9 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
       cats: categoryRows(scoped, win, categories),
       bars: incomeExpenseBars(scoped, win, range),
       balance: balanceSeries(scoped, win, Boolean(focus)),
-      table: inRange,
+      table: scoped
+        .filter((tx) => inWindow(tx, win.start, win.end))
+        .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id)),
       budgets: budgetProgress(budgets, transactions, categories, now),
       recurring: splitRecurrences(recurrences, isoDate(now)),
     };
@@ -251,8 +257,19 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
   async function onShareCsv() {
     if (!csvExport) return;
     const result = await shareCsvFile(csvExport.csv, csvExport.filename, "Ledger transactions");
-    if (result === "shared") toast.success("CSV file ready — save to Files or open in Numbers");
-    else if (result === "failed") toast.error("Share isn't available. Use Save CSV file.");
+    if (result === "cancelled") return;
+    if (result === "shared") {
+      toast.success("Pick Save to Files. Ledger stays open.");
+      closeCsvExport();
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(csvExport.csv);
+      toast.success("CSV copied. Paste it into Numbers.");
+      closeCsvExport();
+    } catch {
+      toast.error("Couldn't share the file from this screen.");
+    }
   }
 
   const isEmpty = transactions.length === 0;
@@ -582,7 +599,20 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
         defaultDate={isoDate(new Date(nowIso))}
         onSubmit={(input) => {
           addTransaction(input);
-          toast.success("Transaction saved");
+          const win = windowFor(range);
+          const visible = inWindow(
+            {
+              id: "new",
+              type: input.type,
+              amount: input.amount,
+              category: input.category,
+              date: input.date,
+              payee: input.payee,
+            },
+            win.start,
+            win.end,
+          );
+          toast.success(visible ? "Transaction saved" : `Saved on ${input.date}. Change the range to see it.`);
         }}
       />
 
@@ -608,26 +638,15 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
           <AlertDialogHeader>
             <AlertDialogTitle>Export CSV</AlertDialogTitle>
             <AlertDialogDescription>
-              {csvExport?.count ?? 0} transactions as a spreadsheet file
-              {csvExport ? ` (${csvExport.filename})` : ""}.
+              {csvExport?.count ?? 0} transactions. On iPhone this opens the share sheet, so you can save
+              the file and come straight back.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {csvExport ? (
-            <form
-              method="post"
-              action={withPreviewPrefix("/api/csv")}
-              target="ledger-csv-frame"
-              className="mt-4 flex flex-col gap-2"
-            >
-              <input type="hidden" name="filename" value={csvExport.filename} />
-              <input type="hidden" name="csv" value={csvExport.csv} />
-              <Button type="submit">Save CSV file</Button>
-              <Button type="button" variant="outline" onClick={() => void onShareCsv()}>
-                Share file
-              </Button>
-              <iframe name="ledger-csv-frame" title="CSV download" className="hidden" />
-            </form>
-          ) : null}
+          <div className="mt-4">
+            <Button type="button" className="w-full" onClick={() => void onShareCsv()}>
+              Save CSV
+            </Button>
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Close</AlertDialogCancel>
           </AlertDialogFooter>

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-const MAX_IMAGE_CHARS = 8_000_000;
+const MAX_IMAGE_CHARS = 500_000;
 const MAX_TEXT_CHARS = 12_000;
 
 function normalizeAmount(value: unknown): number | undefined {
@@ -20,19 +20,65 @@ function normalizeAmount(value: unknown): number | undefined {
   return Math.round(n * 100) / 100;
 }
 
-function normalizeDate(value: unknown): string | undefined {
+function normalizeDate(value: unknown, today = new Date()): string | undefined {
   if (typeof value !== "string") return undefined;
-  const iso = value.match(/(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-  const dmy = value.match(/(\d{1,2})[./](\d{1,2})[./](\d{4})/);
-  if (!dmy) return undefined;
-  return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  let iso: string | undefined;
+  const full = value.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (full) iso = calendarDate(Number(full[1]), Number(full[2]), Number(full[3]));
+  if (!iso) {
+    const dmy = value.match(/(\d{1,2})[./](\d{1,2})[./](\d{2,4})/);
+    if (dmy) {
+      let year = Number(dmy[3]);
+      if (year < 100) year += 2000;
+      iso = calendarDate(year, Number(dmy[2]), Number(dmy[1]));
+    }
+  }
+  return iso ? thisYearIfMisread(iso, today) : undefined;
+}
+
+function calendarDate(year: number, month: number, day: number): string | undefined {
+  if (month < 1 || month > 12 || day < 1 || day > 31) return undefined;
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return undefined;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function thisYearIfMisread(iso: string, today: Date): string {
+  const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return iso;
+  const year = Number(match[1]);
+  const current = today.getFullYear();
+  if (year !== current - 1) return iso;
+  const shifted = `${current}-${match[2]}-${match[3]}`;
+  const shiftedTime = new Date(`${shifted}T12:00:00`).getTime();
+  const endToday = new Date(current, today.getMonth(), today.getDate(), 23, 59, 59).getTime();
+  return shiftedTime <= endToday ? shifted : iso;
 }
 
 function clip(value: unknown, max: number): string | undefined {
   if (typeof value !== "string") return undefined;
   const text = value.replace(/\s+/g, " ").trim().slice(0, max);
   return text || undefined;
+}
+
+function readItems(value: unknown): { name: string; quantity?: number; price?: number }[] {
+  if (!Array.isArray(value)) return [];
+  const items: { name: string; quantity?: number; price?: number }[] = [];
+  for (const row of value) {
+    if (!row || typeof row !== "object") continue;
+    const record = row as { name?: unknown; quantity?: unknown; price?: unknown; qty?: unknown; total?: unknown };
+    const name = clip(record.name, 80);
+    if (!name) continue;
+    const quantity = normalizeAmount(record.quantity ?? record.qty);
+    const price = normalizeAmount(record.price ?? record.total);
+    items.push({
+      name,
+      quantity: quantity && quantity > 0 && quantity <= 1_000_000 ? quantity : undefined,
+      price,
+    });
+    if (items.length >= 30) break;
+  }
+  return items;
 }
 
 function parseModelJson(text: string): unknown {
@@ -42,19 +88,23 @@ function parseModelJson(text: string): unknown {
 }
 
 const ORDER_RULES =
-  "This may be a paper receipt or an online order (email, eMAG, Amazon, or a shop page). Use the amount actually paid, not a subtotal, when both appear. Dates may be YYYY-MM-DD or DD.MM.YYYY. Amounts may use a comma decimal (RON or EUR — convert nothing, keep the charged number). Payee is the shop. Category is 1-2 words. Note can include the order number.";
+  "This may be a paper receipt or an online order. Read every product line, not only the total. Use the amount actually paid (TOTAL / TOTAL DE PLATA), not a line item. Dates may be YYYY-MM-DD or DD.MM.YYYY. Amounts may use a comma decimal. Payee is the shop. Category is 1-2 words. Items are the products: name, quantity (how many; 1 if not printed), and price as the line total paid for that product. Skip tax, discount summary, subtotal, and the grand total. At most 30 items.";
 
 async function completeOrder(
   key: string,
   model: string,
   categories: string[],
   userContent: unknown,
+  signal: AbortSignal,
 ): Promise<Response> {
+  const today = new Date();
+  const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
   const known = categories.length
     ? `Reuse one of these categories when it fits: ${categories.join(", ")}.`
     : "Otherwise invent a short 1-2 word category.";
   return fetch("https://api.x.ai/v1/chat/completions", {
     method: "POST",
+    signal,
     headers: {
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
@@ -64,12 +114,12 @@ async function completeOrder(
       messages: [
         {
           role: "system",
-          content: `${ORDER_RULES} ${known} Reply with only JSON: {"amount": number, "date": string, "payee": string, "category": string, "note": string}.`,
+          content: `${ORDER_RULES} Today is ${todayIso}. The current year is ${today.getFullYear()}. Use ${today.getFullYear()} unless the receipt clearly prints another year. A 2-digit year 26 means ${today.getFullYear()}. ${known} Reply with only JSON: {"amount": number, "date": string, "payee": string, "category": string, "note": string, "items": [{"name": string, "quantity": number, "price": number}]}.`,
         },
         { role: "user", content: userContent },
       ],
       response_format: { type: "json_object" },
-      max_tokens: 300,
+      max_tokens: 2200,
     }),
   });
 }
@@ -97,7 +147,7 @@ export const Route = createFileRoute("/api/scan-receipt")({
           return new Response("Photo required.", { status: 400 });
         }
         if (image.length > MAX_IMAGE_CHARS || orderText.length > MAX_TEXT_CHARS) {
-          return new Response("That is too large. Paste only the order total.", { status: 413 });
+          return new Response("That photo is too large. Crop closer to the total.", { status: 413 });
         }
 
         const userContent = image
@@ -107,35 +157,44 @@ export const Route = createFileRoute("/api/scan-receipt")({
             ]
           : `Extract this online order confirmation:\n${orderText.slice(0, MAX_TEXT_CHARS)}`;
 
-        let res = await completeOrder(key, "grok-4.5", categories, userContent);
-        if (res.status === 429 || res.status === 503 || res.status === 404) {
-          res = await completeOrder(key, "grok-4", categories, userContent);
-        }
-        if (res.status === 429 || res.status === 503) {
-          return new Response("Scanner is busy. Try again in a minute.", { status: 503 });
-        }
-        if (!res.ok) return new Response("Could not read that order.", { status: 502 });
-
-        const data = await res.json().catch(() => null);
-        const text = data?.choices?.[0]?.message?.content ?? "";
-        let raw: unknown;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 22_000);
         try {
-          raw = parseModelJson(typeof text === "string" ? text : "{}");
+          let res = await completeOrder(key, "grok-4.5", categories, userContent, controller.signal);
+          if (res.status === 429 || res.status === 404) {
+            res = await completeOrder(key, "grok-4", categories, userContent, controller.signal);
+          }
+          if (res.status === 429 || res.status === 503) {
+            return new Response("Scanner is busy. Try again in a minute.", { status: 503 });
+          }
+          if (!res.ok) return new Response("Could not read that order.", { status: 502 });
+
+          const data = await res.json().catch(() => null);
+          const text = data?.choices?.[0]?.message?.content ?? "";
+          let raw: unknown;
+          try {
+            raw = parseModelJson(typeof text === "string" ? text : "{}");
+          } catch {
+            return new Response("Could not read that order.", { status: 422 });
+          }
+          const row = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+          const parsed = {
+            amount: normalizeAmount(row.amount ?? row.total),
+            date: normalizeDate(row.date),
+            payee: clip(row.payee ?? row.merchant ?? row.vendor, 80),
+            category: clip(row.category, 40),
+            note: clip(row.note, 160),
+            items: readItems(row.items ?? row.products ?? row.lines),
+          };
+          if (!parsed.amount) {
+            return new Response("Couldn't read the total. Crop the bottom of the receipt.", { status: 422 });
+          }
+          return Response.json(parsed);
         } catch {
-          return new Response("Could not read that order.", { status: 422 });
+          return new Response("Scanner is busy. Try again in a minute.", { status: 503 });
+        } finally {
+          clearTimeout(timer);
         }
-        const row = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-        const parsed = {
-          amount: normalizeAmount(row.amount ?? row.total),
-          date: normalizeDate(row.date),
-          payee: clip(row.payee ?? row.merchant ?? row.vendor, 80),
-          category: clip(row.category, 40),
-          note: clip(row.note, 160),
-        };
-        if (!parsed.amount && !parsed.payee && !parsed.date && !parsed.category) {
-          return new Response("No amount or shop name on that order.", { status: 422 });
-        }
-        return Response.json(parsed);
       },
     },
   },

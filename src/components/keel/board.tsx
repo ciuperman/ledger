@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -27,7 +27,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { keelExportName, keelFromCsv, keelToCsv, parseKeelImport, snapshotFromState } from "@/lib/keel/io";
 import { isDoneColumn, useKeel } from "@/lib/keel/store";
-import { withPreviewPrefix } from "@/lib/preview-path-prefix";
 import type { KeelCard, KeelColumn } from "@/lib/keel/types";
 import { formatDayYear } from "@/lib/ledger/format";
 import { cn } from "@/lib/utils";
@@ -189,8 +188,6 @@ export function KeelBoard() {
   const [newCol, setNewCol] = useState("");
   const [ioMsg, setIoMsg] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const filenameRef = useRef<HTMLInputElement>(null);
-  const csvRef = useRef<HTMLInputElement>(null);
 
   useLayoutEffect(() => {
     hydrate();
@@ -262,18 +259,14 @@ export function KeelBoard() {
     setEditor(null);
   }
 
-  function onExportSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onExport() {
     const snap = snapshotFromState(columns, cards);
     if (snap.cards.length === 0) {
-      event.preventDefault();
       setIoMsg("Add a card, then export.");
       return;
     }
     const csv = keelToCsv(snap);
     const filename = keelExportName();
-    if (filenameRef.current) filenameRef.current.value = filename;
-    if (csvRef.current) csvRef.current.value = csv;
-
     const file = new File([csv], filename, { type: "text/csv" });
     if (typeof navigator.share === "function") {
       let canShare = true;
@@ -283,26 +276,21 @@ export function KeelBoard() {
         canShare = false;
       }
       if (canShare) {
-        event.preventDefault();
-        void navigator.share({ files: [file], title: "Keel" }).then(
-          () => setIoMsg("Choose Save to Files, or open in Numbers."),
-          (err: unknown) => {
-            if (err instanceof DOMException && err.name === "AbortError") return;
-            const url = URL.createObjectURL(file);
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = filename;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-            setIoMsg("CSV downloaded.");
-          },
-        );
-        return;
+        try {
+          await navigator.share({ files: [file], title: "Keel" });
+          setIoMsg("Pick Save to Files. Keel stays open.");
+          return;
+        } catch (err) {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+        }
       }
     }
-    setIoMsg("Downloading CSV…");
+    try {
+      await navigator.clipboard.writeText(csv);
+      setIoMsg("CSV copied. Paste it into Numbers.");
+    } catch {
+      setIoMsg("Couldn't share the file from this screen.");
+    }
   }
 
   async function onImportFile(file: File | undefined) {
@@ -341,18 +329,19 @@ export function KeelBoard() {
               <Upload />
               Import
             </Button>
-            <form method="post" action={withPreviewPrefix("/api/csv")} className="inline" onSubmit={onExportSubmit}>
-              <input ref={filenameRef} type="hidden" name="filename" />
-              <input ref={csvRef} type="hidden" name="csv" />
-              <Button type="submit" variant="outline" size="sm">
-                <Download />
-                Export CSV
-              </Button>
-            </form>
+            <Button type="button" variant="outline" size="sm" onClick={() => void onExport()}>
+              <Download />
+              Export CSV
+            </Button>
           </div>
         </div>
         {ioMsg ? (
-          <p className="mx-auto max-w-6xl px-4 pb-2 text-xs text-muted-foreground sm:px-6">{ioMsg}</p>
+          <p
+            role="status"
+            className="mx-auto mb-2 max-w-6xl rounded-lg border border-[#8fa89a] bg-[#1c2822] px-4 py-2 text-sm text-[#e7f2ea] sm:px-6"
+          >
+            {ioMsg}
+          </p>
         ) : null}
       </header>
 

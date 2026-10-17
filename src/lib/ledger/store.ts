@@ -18,6 +18,7 @@ import {
   persistSnapshot,
   readFileAsJson,
   readLocalSnapshot,
+  receiptDate,
   snapshotFromParts,
 } from "./persist";
 import { advanceDate, planDue } from "./recurrence";
@@ -52,6 +53,7 @@ type LedgerState = {
   persistOk: boolean;
   hydrate: (book?: BookId) => Promise<PostedItem[]>;
   setRange: (range: RangePreset) => void;
+  repairReceiptYears: () => void;
   addTransaction: (input: Omit<Transaction, "id">) => void;
   deleteTransaction: (id: string) => void;
   addCategory: (input: { label: string; type: TxType }) => Category | null;
@@ -240,6 +242,18 @@ export const useLedger = create<LedgerState>((_set, get) => ({
   },
 
   setRange: (range) => commit({ range }),
+
+  repairReceiptYears: () => {
+    const current = get().transactions;
+    let changed = false;
+    const transactions = current.map((tx) => {
+      const date = receiptDate(tx.date);
+      if (date === tx.date) return tx;
+      changed = true;
+      return { ...tx, date };
+    });
+    if (changed) commit({ transactions });
+  },
 
   addTransaction: (input) => {
     const row: Transaction = { ...input, id: crypto.randomUUID() };

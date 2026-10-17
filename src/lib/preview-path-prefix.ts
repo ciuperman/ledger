@@ -14,8 +14,16 @@ const PATH_BASED_PREVIEW_HOSTS = new Set([
 
 const PORT_ID_PREFIX = /^\/hds-[a-z0-9]+-\d+-[a-z0-9]+(?=\/|$)/i;
 
+function isPathPreviewHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().split(":")[0] ?? "";
+  if (PATH_BASED_PREVIEW_HOSTS.has(host)) return true;
+  // Live previews are served on *.grok.me under /hds-…/. Without the prefix,
+  // /api/scan-receipt hits the gateway and comes back as a Cloudflare 502 page.
+  return host === "grok.me" || host.endsWith(".grok.me");
+}
+
 export function previewPathPrefix(hostname: string, pathname: string): string | undefined {
-  if (!PATH_BASED_PREVIEW_HOSTS.has(hostname.toLowerCase())) return undefined;
+  if (!isPathPreviewHost(hostname)) return undefined;
   return PORT_ID_PREFIX.exec(pathname)?.[0];
 }
 

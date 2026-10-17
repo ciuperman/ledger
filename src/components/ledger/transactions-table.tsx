@@ -152,6 +152,24 @@ export function TransactionsTable({
                     <span className="text-subtle"> · {formatDayYear(tx.date)}</span>
                     {tx.note ? <span className="text-subtle"> · {tx.note}</span> : null}
                   </p>
+                  {tx.items && tx.items.length > 0 ? (
+                    <ul className="mt-1 space-y-0.5">
+                      {tx.items.map((item, index) => (
+                        <li
+                          key={`${item.name}-${index}`}
+                          className="flex items-baseline justify-between gap-3 text-xs text-muted-foreground"
+                        >
+                          <span className="min-w-0">
+                            {item.quantity != null ? `${item.quantity} × ` : ""}
+                            {item.name}
+                          </span>
+                          <span className="shrink-0 font-mono tabular-nums">
+                            {item.price != null ? item.price.toFixed(2) : ""}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </div>
                 <Button
                   type="button"
