@@ -16,6 +16,7 @@ export const transactionSchema = z.object({
       z.object({
         name: z.string().trim().min(1).max(80),
         quantity: z.number().finite().positive().max(1_000_000).optional(),
+        unit: z.number().finite().min(0).max(1_000_000_000).optional(),
         price: z.number().finite().min(0).max(1_000_000_000).optional(),
       }),
     )

@@ -474,6 +474,7 @@ export function AddTransaction({
                   <span className="min-w-0">
                     {item.quantity != null ? `${item.quantity} × ` : ""}
                     {item.name}
+                    {item.unit != null && item.unit !== item.price ? ` · ${item.unit.toFixed(2)}` : ""}
                   </span>
                   <span className="shrink-0 font-mono tabular-nums text-muted-foreground">
                     {item.price != null ? item.price.toFixed(2) : ""}

@@ -265,16 +265,18 @@ function readItems(value: unknown): Transaction["items"] {
   const items: NonNullable<Transaction["items"]> = [];
   for (const row of value) {
     if (!row || typeof row !== "object") continue;
-    const record = row as { name?: unknown; quantity?: unknown; price?: unknown };
+    const record = row as { name?: unknown; quantity?: unknown; unit?: unknown; price?: unknown };
     if (typeof record.name !== "string") continue;
     const name = normalizeLabel(record.name).slice(0, 80);
     if (!name) continue;
     const quantity = readQuantity(record.quantity);
-    const price =
-      typeof record.price === "number" && Number.isFinite(record.price) && record.price >= 0
-        ? Math.round(record.price * 100) / 100
+    const money = (value: unknown) =>
+      typeof value === "number" && Number.isFinite(value) && value >= 0
+        ? Math.round(value * 100) / 100
         : undefined;
-    items.push({ name, quantity, price });
+    const unit = money(record.unit);
+    const price = money(record.price);
+    items.push({ name, quantity, unit, price });
     if (items.length >= 40) break;
   }
   return items.length > 0 ? items : undefined;

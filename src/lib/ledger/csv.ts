@@ -30,11 +30,23 @@ function money(n: number): string {
   return n.toFixed(2);
 }
 
+function itemsField(tx: Transaction): string {
+  if (!tx.items?.length) return "";
+  return tx.items
+    .map((item) => {
+      const qty = item.quantity != null ? `${item.quantity} x ` : "";
+      const unit = item.unit != null ? ` @ ${item.unit.toFixed(2)}` : "";
+      const price = item.price != null ? ` = ${item.price.toFixed(2)}` : "";
+      return `${qty}${item.name}${unit}${price}`;
+    })
+    .join("; ");
+}
+
 export function transactionsToCsv(
   transactions: Transaction[],
   categories: Category[],
 ): string {
-  const header = ["Date", "Type", "Payee", "Category", "Product", "Quantity", "Income", "Expense", "Note"];
+  const header = ["Date", "Type", "Payee", "Category", "Product", "Quantity", "Income", "Expense", "Note", "Items"];
   const rows = [...transactions]
     .sort((a, b) => a.date.localeCompare(b.date) || a.payee.localeCompare(b.payee))
     .map((tx) => {
@@ -50,6 +62,7 @@ export function transactionsToCsv(
         income,
         expense,
         csvField(tx.note ?? ""),
+        csvField(itemsField(tx)),
       ].join(",");
     });
   return [header.join(","), ...rows].join("\r\n");
@@ -75,10 +88,11 @@ export function prepareCsvExport(
   transactions: Transaction[],
   categories: Category[],
   book: BookId = "ledger",
+  kind: "expenses" | "income" | "all" = "all",
 ): CsvBundle | null {
   if (transactions.length === 0) return null;
   const csv = `\uFEFF${transactionsToCsv(transactions, categories)}`;
-  const filename = `${book}-transactions-${stamp()}.csv`;
+  const filename = `${book}-${kind}-${stamp()}.csv`;
   const file = new File([csv], filename, { type: "text/csv" });
   return { csv, file, filename, count: transactions.length };
 }

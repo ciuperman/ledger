@@ -78,7 +78,7 @@ type LedgerState = {
   clearAll: () => void;
   exportBackup: () => void;
   importBackup: (file: File) => Promise<void>;
-  importCsv: (file: File) => Promise<{ imported: number; truncated: boolean }>;
+  importCsv: (file: File, type: TxType | "all") => Promise<{ imported: number; truncated: boolean }>;
 };
 
 type Persistable = Pick<
@@ -504,34 +504,95 @@ export const useLedger = create<LedgerState>((_set, get) => ({
     });
   },
 
-  importCsv: async (file) => {
-    const incoming = csvToLedger(await file.text());
+  importCsv: async (file, type) => {
+    const parsed = csvToLedger(await file.text());
+    if (type === "all") {
+      if (parsed.transactions.length === 0) throw new Error("No transactions in that file.");
+      const current = get();
+      const budgets = current.budgets.flatMap((budget) => {
+        const old = findCategory(current.categories, budget.category);
+        if (!old) return [];
+        const next = parsed.categories.find(
+          (category) => category.type === old.type && labelsEqual(category.label, old.label),
+        );
+        return next ? [{ ...budget, category: next.id }] : [];
+      });
+      const recurrences = current.recurrences.flatMap((row) => {
+        const old = findCategory(current.categories, row.category);
+        if (!old) return [];
+        const next = parsed.categories.find(
+          (category) => category.type === old.type && labelsEqual(category.label, old.label),
+        );
+        if (!next) return [];
+        return [
+          {
+            ...row,
+            category: next.id,
+            payee: findPayee(parsed.payees, row.payee, row.type, next.id)?.name ?? row.payee,
+          },
+        ];
+      });
+      commit({
+        transactions: parsed.transactions,
+        categories: parsed.categories,
+        payees: parsed.payees,
+        products: parsed.products,
+        budgets,
+        recurrences,
+      });
+      return { imported: parsed.transactions.length, truncated: parsed.truncated };
+    }
+    const incoming = {
+      ...parsed,
+      transactions: parsed.transactions.filter((tx) => tx.type === type),
+      categories: parsed.categories.filter((category) => category.type === type),
+      payees: parsed.payees.filter((payee) => payee.type === type),
+      products: type === "income" ? parsed.products : [],
+    };
+    if (incoming.transactions.length === 0) {
+      throw new Error(type === "expense" ? "No expenses in that file." : "No income in that file.");
+    }
     const current = get();
-    const budgets = current.budgets.flatMap((b) => {
-      const old = findCategory(current.categories, b.category);
+    const keptTransactions = current.transactions.filter((tx) => tx.type !== type);
+    const categories = [
+      ...current.categories.filter((category) => category.type !== type),
+      ...incoming.categories,
+    ];
+    const payees = [...current.payees.filter((payee) => payee.type !== type), ...incoming.payees];
+    const products = type === "income" ? incoming.products : current.products;
+    const budgets = current.budgets.flatMap((budget) => {
+      const old = findCategory(current.categories, budget.category);
       if (!old) return [];
+      if (old.type !== type) return [budget];
       const next = incoming.categories.find(
-        (c) => c.type === old.type && labelsEqual(c.label, old.label),
+        (category) => category.type === old.type && labelsEqual(category.label, old.label),
       );
-      return next ? [{ ...b, category: next.id }] : [];
+      return next ? [{ ...budget, category: next.id }] : [];
     });
-    const recurrences = current.recurrences.flatMap((r) => {
-      const old = findCategory(current.categories, r.category);
+    const recurrences = current.recurrences.flatMap((row) => {
+      const old = findCategory(current.categories, row.category);
       if (!old) return [];
+      if (old.type !== type) return [row];
       const next = incoming.categories.find(
-        (c) => c.type === old.type && labelsEqual(c.label, old.label),
+        (category) => category.type === old.type && labelsEqual(category.label, old.label),
       );
       if (!next) return [];
-      return [{ ...r, category: next.id, payee: findPayee(incoming.payees, r.payee, r.type, next.id)?.name ?? r.payee }];
+      return [
+        {
+          ...row,
+          category: next.id,
+          payee: findPayee(incoming.payees, row.payee, row.type, next.id)?.name ?? row.payee,
+        },
+      ];
     });
     commit({
-      transactions: incoming.transactions,
-      categories: incoming.categories,
-      payees: incoming.payees,
-      products: incoming.products,
+      transactions: [...incoming.transactions, ...keptTransactions],
+      categories,
+      payees,
+      products,
       budgets,
       recurrences,
     });
-    return { imported: incoming.transactions.length, truncated: incoming.truncated };
+    return { imported: incoming.transactions.length, truncated: parsed.truncated };
   },
 }));

@@ -22,6 +22,7 @@ export type Category = {
 export type ReceiptItem = {
   name: string;
   quantity?: number;
+  unit?: number;
   price?: number;
 };
 

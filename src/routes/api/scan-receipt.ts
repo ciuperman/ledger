@@ -61,20 +61,32 @@ function clip(value: unknown, max: number): string | undefined {
   return text || undefined;
 }
 
-function readItems(value: unknown): { name: string; quantity?: number; price?: number }[] {
+function readItems(value: unknown): { name: string; quantity?: number; unit?: number; price?: number }[] {
   if (!Array.isArray(value)) return [];
-  const items: { name: string; quantity?: number; price?: number }[] = [];
+  const items: { name: string; quantity?: number; unit?: number; price?: number }[] = [];
   for (const row of value) {
     if (!row || typeof row !== "object") continue;
-    const record = row as { name?: unknown; quantity?: unknown; price?: unknown; qty?: unknown; total?: unknown };
+    const record = row as {
+      name?: unknown;
+      quantity?: unknown;
+      qty?: unknown;
+      unit?: unknown;
+      unitPrice?: unknown;
+      pret?: unknown;
+      price?: unknown;
+      total?: unknown;
+      value?: unknown;
+    };
     const name = clip(record.name, 80);
     if (!name) continue;
     const quantity = normalizeAmount(record.quantity ?? record.qty);
-    const price = normalizeAmount(record.price ?? record.total);
+    const unit = normalizeAmount(record.unit ?? record.unitPrice ?? record.pret);
+    const price = normalizeAmount(record.price ?? record.total ?? record.value);
     items.push({
       name,
       quantity: quantity && quantity > 0 && quantity <= 1_000_000 ? quantity : undefined,
-      price,
+      unit,
+      price: price ?? unit,
     });
     if (items.length >= 30) break;
   }
@@ -88,7 +100,7 @@ function parseModelJson(text: string): unknown {
 }
 
 const ORDER_RULES =
-  "This may be a paper receipt or an online order. Read every product line, not only the total. Use the amount actually paid (TOTAL / TOTAL DE PLATA), not a line item. Dates may be YYYY-MM-DD or DD.MM.YYYY. Amounts may use a comma decimal. Payee is the shop. Category is 1-2 words. Items are the products: name, quantity (how many; 1 if not printed), and price as the line total paid for that product. Skip tax, discount summary, subtotal, and the grand total. At most 30 items.";
+  "This may be a paper receipt or an online order. Read every product line, not only the total. Use the amount actually paid (TOTAL / TOTAL DE PLATA), not a line item. Dates may be YYYY-MM-DD or DD.MM.YYYY. Amounts may use a comma decimal. Payee is the shop. Category is 1-2 words. Items are the products. For each item read the printed unit price (PRET / pret unitar) as unit, and the line amount (VALOARE) as price. Quantity is how many, or 1 if not printed. If only one amount is printed, put it in both unit and price. Skip tax, discount summary, subtotal, and the grand total. At most 30 items.";
 
 async function completeOrder(
   key: string,
@@ -114,7 +126,7 @@ async function completeOrder(
       messages: [
         {
           role: "system",
-          content: `${ORDER_RULES} Today is ${todayIso}. The current year is ${today.getFullYear()}. Use ${today.getFullYear()} unless the receipt clearly prints another year. A 2-digit year 26 means ${today.getFullYear()}. ${known} Reply with only JSON: {"amount": number, "date": string, "payee": string, "category": string, "note": string, "items": [{"name": string, "quantity": number, "price": number}]}.`,
+          content: `${ORDER_RULES} Today is ${todayIso}. The current year is ${today.getFullYear()}. Use ${today.getFullYear()} unless the receipt clearly prints another year. A 2-digit year 26 means ${today.getFullYear()}. ${known} Reply with only JSON: {"amount": number, "date": string, "payee": string, "category": string, "note": string, "items": [{"name": string, "quantity": number, "unit": number, "price": number}]}.`,
         },
         { role: "user", content: userContent },
       ],

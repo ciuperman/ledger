@@ -15,12 +15,12 @@ import {
   type LedgerFocus,
 } from "@/lib/ledger/analytics";
 import { categoryLabel, labelsEqual } from "@/lib/ledger/categories";
-import { prepareCsvExport, shareCsvFile, readCsvFile, type CsvBundle } from "@/lib/ledger/csv";
+import { prepareCsvExport, shareCsvFile, readCsvFile } from "@/lib/ledger/csv";
 import { isoDate } from "@/lib/ledger/format";
 import { withPreviewPrefix } from "@/lib/preview-path-prefix";
 import { splitRecurrences } from "@/lib/ledger/recurrence";
 import { useLedger } from "@/lib/ledger/store";
-import type { BookId, CategoryId } from "@/lib/ledger/types";
+import type { BookId, CategoryId, TxType } from "@/lib/ledger/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -131,10 +131,16 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
   const [budgetsOpen, setBudgetsOpen] = useState(false);
   const [recurringOpen, setRecurringOpen] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
-  const [csvConfirm, setCsvConfirm] = useState<{ count: number; truncated: boolean } | null>(null);
-  const [csvExport, setCsvExport] = useState<CsvBundle | null>(null);
+  const [csvConfirm, setCsvConfirm] = useState<{
+    count: number;
+    truncated: boolean;
+    scope: string;
+  } | null>(null);
+  const [csvOpen, setCsvOpen] = useState(false);
+  const [csvImportOpen, setCsvImportOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const csvRef = useRef<HTMLInputElement>(null);
+  const csvKindRef = useRef<TxType | "all">("all");
   const csvFileRef = useRef<File | null>(null);
 
   useLayoutEffect(() => {
@@ -219,7 +225,7 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
 
   async function applyCsv(file: File) {
     try {
-      const result = await importCsv(file);
+      const result = await importCsv(file, csvKindRef.current);
       const extra = result.truncated ? " First 5000 rows used." : "";
       toast.success(`Loaded ${result.imported} transactions from spreadsheet.${extra}`);
     } catch (err) {
@@ -230,43 +236,70 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
   async function onPickCsv(file: File) {
     try {
       const preview = await readCsvFile(file);
+      const type = csvKindRef.current;
+      const count =
+        type === "all"
+          ? preview.transactions.length
+          : preview.transactions.filter((tx) => tx.type === type).length;
+      if (count === 0) {
+        throw new Error(
+          type === "expense"
+            ? "No expenses in that file."
+            : type === "income"
+              ? "No income in that file."
+              : "No transactions in that file.",
+        );
+      }
       if (transactions.length === 0) {
         await applyCsv(file);
         return;
       }
+      const scope =
+        type === "expense"
+          ? "Expenses in the file replace the expenses on this device. Income stays."
+          : type === "income"
+            ? "Income in the file replaces the income on this device. Expenses stay."
+            : "Everything in the file replaces both expenses and income on this device.";
       csvFileRef.current = file;
-      setCsvConfirm({ count: preview.transactions.length, truncated: preview.truncated });
+      setCsvConfirm({ count, truncated: preview.truncated, scope });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "CSV import failed");
     }
   }
 
+  function beginCsvImport(type: TxType | "all") {
+    csvKindRef.current = type;
+    setCsvImportOpen(false);
+    csvRef.current?.click();
+  }
+
   function openCsvExport() {
-    const prepared = prepareCsvExport(transactions, categories, book);
+    setCsvOpen(true);
+  }
+
+  async function onShareCsv(type: TxType | "all") {
+    const kind = type === "expense" ? "expenses" : type === "income" ? "income" : "all";
+    const prepared = prepareCsvExport(
+      type === "all" ? transactions : transactions.filter((tx) => tx.type === type),
+      categories,
+      book,
+      kind,
+    );
     if (!prepared) {
-      toast.error("No transactions to export");
+      toast.error(
+        type === "expense" ? "No expenses to export" : type === "income" ? "No income to export" : "No transactions to export",
+      );
       return;
     }
-    setCsvExport(prepared);
-  }
-
-  function closeCsvExport() {
-    setCsvExport(null);
-  }
-
-  async function onShareCsv() {
-    if (!csvExport) return;
-    const result = await shareCsvFile(csvExport.csv, csvExport.filename, "Ledger transactions");
+    const result = await shareCsvFile(prepared.csv, prepared.filename, `Ledger ${kind}`);
     if (result === "cancelled") return;
     if (result === "shared") {
-      toast.success("Pick Save to Files. Ledger stays open.");
-      closeCsvExport();
+      setCsvOpen(false);
       return;
     }
     try {
-      await navigator.clipboard.writeText(csvExport.csv);
-      toast.success("CSV copied. Paste it into Numbers.");
-      closeCsvExport();
+      await navigator.clipboard.writeText(prepared.csv);
+      setCsvOpen(false);
     } catch {
       toast.error("Couldn't share the file from this screen.");
     }
@@ -343,11 +376,11 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel>Data</DropdownMenuLabel>
-                <DropdownMenuItem onSelect={() => openCsvExport()}>
+                <DropdownMenuItem onSelect={() => setCsvOpen(true)}>
                   <FileSpreadsheet />
                   Export CSV
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => csvRef.current?.click()}>
+                <DropdownMenuItem onSelect={() => setCsvImportOpen(true)}>
                   <FileUp />
                   Import CSV
                 </DropdownMenuItem>
@@ -432,7 +465,7 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
                 <Repeat />
                 Recurring
               </Button>
-              <Button type="button" size="sm" variant="outline" onClick={() => csvRef.current?.click()}>
+              <Button type="button" size="sm" variant="outline" onClick={() => setCsvImportOpen(true)}>
                 <FileUp />
                 Import CSV
               </Button>
@@ -576,7 +609,7 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
               emptyHint="No transactions yet."
               canExport
               onExportCsv={openCsvExport}
-              onImportCsv={() => csvRef.current?.click()}
+              onImportCsv={() => setCsvImportOpen(true)}
               onDelete={(id) => {
                 deleteTransaction(id);
                 toast.success("Transaction deleted");
@@ -628,23 +661,50 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
         />
       </Suspense>
 
-      <AlertDialog
-        open={csvExport !== null}
-        onOpenChange={(open) => {
-          if (!open) closeCsvExport();
-        }}
-      >
+      <AlertDialog open={csvOpen} onOpenChange={setCsvOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Export CSV</AlertDialogTitle>
             <AlertDialogDescription>
-              {csvExport?.count ?? 0} transactions. On iPhone this opens the share sheet, so you can save
-              the file and come straight back.
+              Expenses and income are separate files. Export expenses when you want them analyzed.
+              Income stays out of that file.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="mt-4">
-            <Button type="button" className="w-full" onClick={() => void onShareCsv()}>
-              Save CSV
+          <div className="mt-4 flex flex-col gap-2">
+            <Button type="button" className="w-full" onClick={() => void onShareCsv("expense")}>
+              Save expenses ({transactions.filter((tx) => tx.type === "expense").length})
+            </Button>
+            <Button type="button" variant="outline" className="w-full" onClick={() => void onShareCsv("income")}>
+              Save income ({transactions.filter((tx) => tx.type === "income").length})
+            </Button>
+            <Button type="button" variant="outline" className="w-full" onClick={() => void onShareCsv("all")}>
+              Save all ({transactions.length})
+            </Button>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Close</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={csvImportOpen} onOpenChange={setCsvImportOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Import CSV</AlertDialogTitle>
+            <AlertDialogDescription>
+              Pick one side. Importing expenses replaces only expenses. Income stays on this device, and
+              the other way around.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="mt-4 flex flex-col gap-2">
+            <Button type="button" className="w-full" onClick={() => beginCsvImport("expense")}>
+              Load expenses
+            </Button>
+            <Button type="button" variant="outline" className="w-full" onClick={() => beginCsvImport("income")}>
+              Load income
+            </Button>
+            <Button type="button" variant="outline" className="w-full" onClick={() => beginCsvImport("all")}>
+              Load all
             </Button>
           </div>
           <AlertDialogFooter>
@@ -691,8 +751,7 @@ export function Dashboard({ nowIso, book = "ledger" }: { nowIso: string; book?: 
           <AlertDialogHeader>
             <AlertDialogTitle>Load this spreadsheet?</AlertDialogTitle>
             <AlertDialogDescription>
-              Ledger will show only the {csvConfirm?.count ?? 0} transactions from the file.
-              Current transactions are replaced — like swapping a disc.
+              {csvConfirm?.count ?? 0} transactions. {csvConfirm?.scope}
               {csvConfirm?.truncated ? " Only the first 5000 rows will be used." : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
