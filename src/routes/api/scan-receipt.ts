@@ -140,6 +140,14 @@ export const Route = createFileRoute("/api/scan-receipt")({
   server: {
     handlers: {
       POST: async ({ request }) => {
+        const { assertSameSiteRequest } = await import("@/lib/auth/isolation.server");
+        const { requireUserId } = await import("@/lib/auth/verify.server");
+        try {
+          assertSameSiteRequest();
+          await requireUserId();
+        } catch {
+          return new Response("Unauthorized", { status: 401 });
+        }
         const key = process.env.XAI_API_KEY;
         if (!key) return new Response("Receipt scan is unavailable.", { status: 503 });
 
