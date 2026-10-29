@@ -26,7 +26,7 @@ function Login() {
       setError(res.error.message ?? "Eroare la autentificare");
       return;
     }
-    await navigate({ to: "/" });
+    window.location.href = "/";
   }
 
   const input =
