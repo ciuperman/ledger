@@ -1,5 +1,6 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { AuthProvider } from "@/lib/auth/provider";
+import { AuthGate } from "@/components/auth-gate";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "sonner";
@@ -36,7 +37,9 @@ export const Route = createRootRoute({
         <PreviewHostBridge />
         <AuthProvider>
           <TooltipProvider>
-            <Outlet />
+            <AuthGate>
+              <Outlet />
+            </AuthGate>
             <Toaster
               theme="dark"
               position="top-center"

@@ -11,8 +11,10 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as KeelRouteImport } from './routes/keel'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as ApiCsvRouteImport } from './routes/api/csv'
 import { Route as ApiScanReceiptRouteImport } from './routes/api/scan-receipt'
+import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,6 +24,11 @@ const IndexRoute = IndexRouteImport.update({
 const KeelRoute = KeelRouteImport.update({
   id: '/keel',
   path: '/keel',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiCsvRoute = ApiCsvRouteImport.update({
@@ -34,39 +41,61 @@ const ApiScanReceiptRoute = ApiScanReceiptRouteImport.update({
   path: '/api/scan-receipt',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
+  id: '/api/auth/$',
+  path: '/api/auth/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/keel': typeof KeelRoute
+  '/login': typeof LoginRoute
   '/api/csv': typeof ApiCsvRoute
   '/api/scan-receipt': typeof ApiScanReceiptRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/keel': typeof KeelRoute
+  '/login': typeof LoginRoute
   '/api/csv': typeof ApiCsvRoute
   '/api/scan-receipt': typeof ApiScanReceiptRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/keel': typeof KeelRoute
+  '/login': typeof LoginRoute
   '/api/csv': typeof ApiCsvRoute
   '/api/scan-receipt': typeof ApiScanReceiptRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/keel' | '/api/csv' | '/api/scan-receipt'
+  fullPaths:
+    '/' | '/keel' | '/login' | '/api/csv' | '/api/scan-receipt' | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/keel' | '/api/csv' | '/api/scan-receipt'
-  id: '__root__' | '/' | '/keel' | '/api/csv' | '/api/scan-receipt'
+  to:
+    '/' | '/keel' | '/login' | '/api/csv' | '/api/scan-receipt' | '/api/auth/$'
+  id:
+    | '__root__'
+    | '/'
+    | '/keel'
+    | '/login'
+    | '/api/csv'
+    | '/api/scan-receipt'
+    | '/api/auth/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   KeelRoute: typeof KeelRoute
+  LoginRoute: typeof LoginRoute
   ApiCsvRoute: typeof ApiCsvRoute
   ApiScanReceiptRoute: typeof ApiScanReceiptRoute
+  ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -85,6 +114,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof KeelRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/csv': {
       id: '/api/csv'
       path: '/api/csv'
@@ -99,14 +135,23 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiScanReceiptRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/auth/$': {
+      id: '/api/auth/$'
+      path: '/api/auth/$'
+      fullPath: '/api/auth/$'
+      preLoaderRoute: typeof ApiAuthSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   KeelRoute: KeelRoute,
+  LoginRoute: LoginRoute,
   ApiCsvRoute: ApiCsvRoute,
   ApiScanReceiptRoute: ApiScanReceiptRoute,
+  ApiAuthSplatRoute: ApiAuthSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
