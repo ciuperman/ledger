@@ -1,6 +1,5 @@
 // Client-side sync of per-user documents to the server (Postgres).
 // localStorage stays as a fast local cache; the server is the source of truth.
-import { getUserDoc, putUserDoc } from "./sync.functions";
 
 type Doc = { updatedAt: number };
 const ready = new Set<string>();
@@ -12,7 +11,13 @@ async function flush(key: string) {
   if (!doc) return;
   pending.delete(key);
   try {
-    await putUserDoc({ data: { key, json: JSON.stringify(doc), updatedAt: doc.updatedAt } });
+    const res = await fetch("/api/docs", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key, data: doc, updatedAt: doc.updatedAt }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
   } catch (err) {
     console.error("[sync] save failed", err);
     if (!pending.has(key)) pending.set(key, doc);
@@ -46,9 +51,11 @@ export async function syncOnLoad<T extends Doc>(
 ): Promise<T | null> {
   if (typeof window === "undefined") return null;
   try {
-    const res = await getUserDoc({ data: { key } });
+    const r = await fetch(`/api/docs?key=${encodeURIComponent(key)}`, { credentials: "same-origin" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const res = (await r.json()) as { data: unknown } | null;
     ready.add(key);
-    const remote = res ? parse(JSON.parse(res.json)) : null;
+    const remote = res ? parse(res.data) : null;
     if (remote && (!local || remote.updatedAt >= local.updatedAt)) return remote;
     if (local) pushRemote(key, local);
     return null;
