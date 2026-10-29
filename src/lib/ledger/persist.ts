@@ -1,3 +1,4 @@
+import { pushRemote } from "../sync";
 import {
   FALLBACK_COLOR,
   LEGACY_CATEGORIES,
@@ -478,6 +479,7 @@ export function pickNewest(a: Snapshot | null, b: Snapshot | null): Snapshot | n
 export function persistSnapshot(snap: Snapshot, book: BookId = "ledger"): boolean {
   const ok = writeLocalSnapshot(snap, book);
   void writeIdbSnapshot(snap, book);
+  pushRemote(storageKeyFor(book), snap);
   return ok;
 }
 

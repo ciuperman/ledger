@@ -30,6 +30,7 @@
  * a verified id via `@/lib/auth/middleware`.
  */
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { bearer, genericOAuth } from "better-auth/plugins";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { getCookie } from "@tanstack/react-start/server";
@@ -211,6 +212,29 @@ export const auth = betterAuth({
 
   // Local email/password — toggled only via `./email-password` (not a plugin).
   ...(emailAndPasswordEnabled ? { emailAndPassword: { enabled: true } } : {}),
+
+  // Closed sign-ups: a new user is allowed only when the user table is empty
+  // (first owner) or the email is listed in ALLOWED_EMAILS (comma-separated).
+  databaseHooks: {
+    user: {
+      create: {
+        before: async (user) => {
+          const allowed = (env("ALLOWED_EMAILS") ?? "")
+            .split(",")
+            .map((e) => e.trim().toLowerCase())
+            .filter(Boolean);
+          if (allowed.includes(String(user.email ?? "").toLowerCase())) return;
+          const { getSql } = await import("../db");
+          const sql = await getSql();
+          const rows = await sql<{ n: number }>`select count(*)::int as n from "user"`;
+          if (Number(rows[0]?.n ?? 0) === 0) return;
+          throw new APIError("FORBIDDEN", {
+            message: "Înregistrarea conturilor noi este închisă.",
+          });
+        },
+      },
+    },
+  },
 
   // `__Host-` prefixed cookies: the browser REFUSES any same-named cookie that
   // carries a `Domain` attribute, so a sibling `*.grok.me` app cannot "toss" a

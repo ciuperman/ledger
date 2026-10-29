@@ -45,7 +45,7 @@ function Login() {
           {busy ? "…" : mode === "in" ? "Intră" : "Creează cont"}
         </button>
         <button type="button" onClick={() => setMode(mode === "in" ? "up" : "in")} className="w-full cursor-pointer text-sm opacity-70 hover:underline">
-          {mode === "in" ? "Nu ai cont? Creează unul" : "Ai deja cont? Intră"}
+          {mode === "in" ? "Cont nou (doar cu invitație)" : "Ai deja cont? Intră"}
         </button>
       </form>
     </main>

@@ -20,7 +20,11 @@ import {
   readLocalSnapshot,
   receiptDate,
   snapshotFromParts,
+  asSnapshot,
+  storageKeyFor,
+  writeLocalSnapshot,
 } from "./persist";
+import { syncOnLoad } from "../sync";
 import { advanceDate, planDue } from "./recurrence";
 import type {
   BookId,
@@ -223,6 +227,7 @@ export const useLedger = create<LedgerState>((_set, get) => ({
     });
     try {
       const local = readLocalSnapshot(book);
+      let hadLocal = local !== null;
       if (local) {
         applySnapshot(local);
       } else {
@@ -233,6 +238,17 @@ export const useLedger = create<LedgerState>((_set, get) => ({
       if (newest && newest.updatedAt > (get().savedAt ?? 0)) {
         applySnapshot(newest);
         persistSnapshot(newest, book);
+        hadLocal = true;
+      }
+      const remote = await syncOnLoad(
+        storageKeyFor(book),
+        hadLocal ? { ...snapshotFrom(get()), updatedAt: get().savedAt ?? 0 } : null,
+        asSnapshot,
+      );
+      if (get().book !== book) return [];
+      if (remote) {
+        applySnapshot(remote);
+        writeLocalSnapshot(remote, book);
       }
       return get().postDueRecurrences();
     } catch {
