@@ -64,3 +64,48 @@ export async function syncOnLoad<T extends Doc>(
     return null;
   }
 }
+
+const SYNCED_KEYS = ["ledger.v2", "keel.v2", "keel.board.v1"];
+
+/** Upload every pending save now. Resolves true when nothing is left unsaved. */
+export async function flushAll(): Promise<boolean> {
+  for (const t of timers.values()) clearTimeout(t);
+  timers.clear();
+  for (const key of [...pending.keys()]) await flush(key);
+  for (const t of timers.values()) clearTimeout(t);
+  timers.clear();
+  return pending.size === 0;
+}
+
+/** Remove the synced documents from this browser (localStorage + IndexedDB). */
+export async function clearLocalCache(): Promise<void> {
+  ready.clear();
+  for (const key of SYNCED_KEYS) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    await new Promise<void>((resolve) => {
+      const req = indexedDB.open("ledger-app", 1);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains("kv")) req.result.createObjectStore("kv");
+      };
+      req.onerror = () => resolve();
+      req.onsuccess = () => {
+        try {
+          const tx = req.result.transaction("kv", "readwrite");
+          for (const key of SYNCED_KEYS) tx.objectStore("kv").delete(key);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => resolve();
+        } catch {
+          resolve();
+        }
+      };
+    });
+  } catch {
+    /* ignore */
+  }
+}
