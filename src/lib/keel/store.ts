@@ -1,4 +1,3 @@
-import { pushRemote, syncOnLoad } from "../sync";
 import { create } from "zustand";
 import type { KeelCard, KeelColumn, KeelColumnId, KeelSnapshot } from "./types";
 
@@ -155,7 +154,6 @@ function commit(patch: Partial<Pick<KeelState, "columns" | "cards">>) {
   };
   const persistOk = writeLocal(next);
   void writeIdb(next);
-  pushRemote(STORAGE_KEY, next);
   useKeel.setState({
     columns: next.columns,
     cards: next.cards,
@@ -172,19 +170,13 @@ export const useKeel = create<KeelState>((_set, get) => ({
 
   hydrate: () => {
     if (get().hydrated) return;
-    const existing = readLocal();
-    const snap = existing ?? emptyBoard();
+    const snap = readLocal() ?? emptyBoard();
     if (!readLocal()) writeLocal(snap);
     useKeel.setState({
       hydrated: true,
       persistOk: true,
       columns: snap.columns,
       cards: snap.cards,
-    });
-    void syncOnLoad(STORAGE_KEY, existing, asSnapshot).then((remote) => {
-      if (!remote) return;
-      writeLocal(remote);
-      useKeel.setState({ columns: remote.columns, cards: remote.cards });
     });
   },
 

@@ -13,7 +13,6 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as KeelRouteImport } from './routes/keel'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ApiCsvRouteImport } from './routes/api/csv'
-import { Route as ApiDocsRouteImport } from './routes/api/docs'
 import { Route as ApiScanReceiptRouteImport } from './routes/api/scan-receipt'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
@@ -37,11 +36,6 @@ const ApiCsvRoute = ApiCsvRouteImport.update({
   path: '/api/csv',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiDocsRoute = ApiDocsRouteImport.update({
-  id: '/api/docs',
-  path: '/api/docs',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiScanReceiptRoute = ApiScanReceiptRouteImport.update({
   id: '/api/scan-receipt',
   path: '/api/scan-receipt',
@@ -58,7 +52,6 @@ export interface FileRoutesByFullPath {
   '/keel': typeof KeelRoute
   '/login': typeof LoginRoute
   '/api/csv': typeof ApiCsvRoute
-  '/api/docs': typeof ApiDocsRoute
   '/api/scan-receipt': typeof ApiScanReceiptRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
@@ -67,7 +60,6 @@ export interface FileRoutesByTo {
   '/keel': typeof KeelRoute
   '/login': typeof LoginRoute
   '/api/csv': typeof ApiCsvRoute
-  '/api/docs': typeof ApiDocsRoute
   '/api/scan-receipt': typeof ApiScanReceiptRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
@@ -77,36 +69,22 @@ export interface FileRoutesById {
   '/keel': typeof KeelRoute
   '/login': typeof LoginRoute
   '/api/csv': typeof ApiCsvRoute
-  '/api/docs': typeof ApiDocsRoute
   '/api/scan-receipt': typeof ApiScanReceiptRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | '/'
-    | '/keel'
-    | '/login'
-    | '/api/csv'
-    | '/api/docs'
-    | '/api/scan-receipt'
-    | '/api/auth/$'
+    '/' | '/keel' | '/login' | '/api/csv' | '/api/scan-receipt' | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
-    | '/keel'
-    | '/login'
-    | '/api/csv'
-    | '/api/docs'
-    | '/api/scan-receipt'
-    | '/api/auth/$'
+    '/' | '/keel' | '/login' | '/api/csv' | '/api/scan-receipt' | '/api/auth/$'
   id:
     | '__root__'
     | '/'
     | '/keel'
     | '/login'
     | '/api/csv'
-    | '/api/docs'
     | '/api/scan-receipt'
     | '/api/auth/$'
   fileRoutesById: FileRoutesById
@@ -116,7 +94,6 @@ export interface RootRouteChildren {
   KeelRoute: typeof KeelRoute
   LoginRoute: typeof LoginRoute
   ApiCsvRoute: typeof ApiCsvRoute
-  ApiDocsRoute: typeof ApiDocsRoute
   ApiScanReceiptRoute: typeof ApiScanReceiptRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
@@ -151,13 +128,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCsvRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/docs': {
-      id: '/api/docs'
-      path: '/api/docs'
-      fullPath: '/api/docs'
-      preLoaderRoute: typeof ApiDocsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/scan-receipt': {
       id: '/api/scan-receipt'
       path: '/api/scan-receipt'
@@ -180,7 +150,6 @@ const rootRouteChildren: RootRouteChildren = {
   KeelRoute: KeelRoute,
   LoginRoute: LoginRoute,
   ApiCsvRoute: ApiCsvRoute,
-  ApiDocsRoute: ApiDocsRoute,
   ApiScanReceiptRoute: ApiScanReceiptRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
 }

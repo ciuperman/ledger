@@ -2,7 +2,6 @@ import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { Check, LogOut } from "lucide-react";
 import { signOut } from "@/lib/auth/client";
-import { clearLocalCache, flushAll } from "@/lib/sync";
 import { cn } from "@/lib/utils";
 import type { BookId } from "@/lib/ledger/types";
 
@@ -21,12 +20,6 @@ export function LogoutButton() {
   async function onClick() {
     setBusy(true);
     try {
-      const saved = await flushAll();
-      if (!saved && !window.confirm("Unele modificări nu s-au salvat pe server. Ieși oricum?")) {
-        setBusy(false);
-        return;
-      }
-      if (saved) await clearLocalCache();
       await signOut("/login");
     } catch {
       setBusy(false);
