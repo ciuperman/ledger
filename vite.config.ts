@@ -14,7 +14,6 @@ import { isMigrationFile } from "./scripts/migration-plan.mjs";
 
 const isGitHubPages = process.env.GITHUB_PAGES === "true";
 
-/** The files `src/lib/db.ts` globs — same directory, same non-recursive scope. */
 function hasGlobbedMigrations(root: string): boolean {
   try {
     return readdirSync(join(root, "migrations")).some(isMigrationFile);
@@ -142,8 +141,8 @@ export default defineConfig(({ command, isPreview }) => ({
     ...(command === "build" || isPreview
       ? [
           nitro({
-            preset: isGitHubPages ? "github_pages" : "vercel",
-            serverDir: isGitHubPages ? false : "./server",
+            preset: "vercel",
+            serverDir: "./server",
           }),
         ]
       : []),
