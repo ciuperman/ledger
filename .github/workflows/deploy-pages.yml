@@ -32,11 +32,19 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          GITHUB_PAGES: "true"
+
+      - name: SPA fallback
+        run: |
+          if [ -f .output/public/index.html ]; then
+            cp .output/public/index.html .output/public/404.html
+          fi
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .vercel/output/static
+          path: .output/public
 
   deploy:
     environment:
