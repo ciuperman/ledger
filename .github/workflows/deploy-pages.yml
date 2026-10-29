@@ -35,16 +35,31 @@ jobs:
         env:
           GITHUB_PAGES: "true"
 
-      - name: SPA fallback
+      - name: Create index.html
         run: |
-          if [ -f .output/public/index.html ]; then
-            cp .output/public/index.html .output/public/404.html
-          fi
+          MAIN_JS=$(ls .vercel/output/static/assets/index-*.js | head -1 | xargs basename)
+          CSS=$(ls .vercel/output/static/assets/styles-*.css | head -1 | xargs basename)
+          cat > .vercel/output/static/index.html << EOF
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+            <title>Ledger</title>
+            <link rel="stylesheet" href="/ledger/assets/${CSS}" />
+          </head>
+          <body>
+            <div id="root"></div>
+            <script type="module" src="/ledger/assets/${MAIN_JS}"></script>
+          </body>
+          </html>
+          EOF
+          cp .vercel/output/static/index.html .vercel/output/static/404.html
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .output/public
+          path: .vercel/output/static
 
   deploy:
     environment:
