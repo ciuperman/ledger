@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { KeelCard, KeelColumn, KeelColumnId, KeelSnapshot } from "./types";
+import type { KeelCard, KeelCheck, KeelColumn, KeelColumnId, KeelSnapshot } from "./types";
 
 const STORAGE_KEY = "keel.board.v1";
 const IDB_NAME = "ledger-app";
@@ -25,6 +25,20 @@ export function isDoneColumn(col: Pick<KeelColumn, "id" | "title">): boolean {
 function readDoneAt(value: unknown): string | undefined {
   if (typeof value !== "string" || !ISO_DATE.test(value)) return undefined;
   return value;
+}
+
+function readChecks(value: unknown): KeelCheck[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: KeelCheck[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Partial<KeelCheck>;
+    const text = typeof row.text === "string" ? row.text.trim().slice(0, 80) : "";
+    if (!text || typeof row.id !== "string" || !row.id) continue;
+    out.push({ id: row.id, text, done: row.done === true });
+    if (out.length >= 40) break;
+  }
+  return out.length ? out : undefined;
 }
 
 function emptyBoard(now = Date.now()): KeelSnapshot {
@@ -65,6 +79,7 @@ export function asSnapshot(raw: unknown): KeelSnapshot | null {
       title,
       note: note || undefined,
       doneAt,
+      checks: readChecks((card as KeelCard).checks),
     });
   }
   return { v: 2, updatedAt: o.updatedAt, columns, cards };
@@ -122,6 +137,9 @@ function applyDoneStamp(
   if (isDoneColumn(dest)) {
     return { ...card, columnId, doneAt: card.doneAt ?? todayIso() };
   }
+  if (card.columnId !== columnId) {
+    return { ...card, columnId, doneAt: undefined };
+  }
   return { ...card, columnId };
 }
 
@@ -135,7 +153,7 @@ type KeelState = {
   renameColumn: (id: KeelColumnId, title: string) => boolean;
   deleteColumn: (id: KeelColumnId) => void;
   addCard: (columnId: KeelColumnId, title: string, note?: string) => KeelCard | null;
-  updateCard: (id: string, patch: { title?: string; note?: string; doneAt?: string | null }) => boolean;
+  updateCard: (id: string, patch: { title?: string; note?: string; doneAt?: string | null; checks?: KeelCheck[] | null }) => boolean;
   deleteCard: (id: string) => void;
   moveCard: (cardId: string, columnId: KeelColumnId, index: number) => void;
   moveColumn: (columnId: KeelColumnId, toIndex: number) => void;
@@ -237,7 +255,8 @@ export const useKeel = create<KeelState>((_set, get) => ({
         if (patch.doneAt !== undefined) {
           doneAt = patch.doneAt && ISO_DATE.test(patch.doneAt) ? patch.doneAt : undefined;
         }
-        return { ...c, title: title || c.title, note, doneAt };
+        const checks = patch.checks !== undefined ? readChecks(patch.checks) : c.checks;
+        return { ...c, title: title || c.title, note, doneAt, checks };
       }),
     });
     return true;

@@ -21,56 +21,43 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { keelExportName, keelFromCsv, keelToCsv, parseKeelImport, snapshotFromState } from "@/lib/keel/io";
 import { isDoneColumn, useKeel } from "@/lib/keel/store";
-import type { KeelCard, KeelColumn } from "@/lib/keel/types";
+import type { KeelCard, KeelCheck, KeelColumn } from "@/lib/keel/types";
 import { formatDayYear } from "@/lib/ledger/format";
 import { cn } from "@/lib/utils";
 
-function todayIso(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function CheckBox({ checked }: { checked: boolean }) {
+function ListMark({ done }: { done: boolean }) {
   return (
     <span
       className={cn(
-        "flex size-[1.35rem] items-center justify-center rounded-[5px] border",
-        checked ? "border-income bg-income text-[#08090b]" : "border-subtle bg-transparent",
+        "flex size-[1.35rem] items-center justify-center rounded-full border-[1.5px]",
+        done ? "border-[#e3b23c] bg-[#e3b23c] text-[#1a1404]" : "border-[#8e96a0] bg-transparent",
       )}
       aria-hidden
     >
-      {checked ? <Check className="size-3.5" strokeWidth={3} /> : null}
+      {done ? <Check className="size-3" strokeWidth={3} /> : null}
     </span>
-  );
-}
-
-function CardBody({ card }: { card: KeelCard }) {
-  const checked = Boolean(card.doneAt);
-  return (
-    <div className="min-w-0 flex-1 py-3 pr-3">
-      <p className={cn("text-sm font-medium leading-snug", checked && "text-muted-foreground line-through")}>
-        {card.title}
-      </p>
-      {card.note ? <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{card.note}</p> : null}
-      {card.doneAt ? (
-        <p className="mt-1.5 text-[11px] font-medium tracking-wide text-subtle">Done {formatDayYear(card.doneAt)}</p>
-      ) : null}
-    </div>
   );
 }
 
 function CardFace({ card, muted }: { card: KeelCard; muted?: boolean }) {
   return (
-    <div
-      className={cn(
-        "flex items-start rounded-xl bg-card pl-1.5 shadow-[var(--shadow-border)]",
-        muted && "opacity-60",
-      )}
-    >
-      <span className="mt-3 flex size-9 shrink-0 items-center justify-center">
-        <CheckBox checked={Boolean(card.doneAt)} />
-      </span>
-      <CardBody card={card} />
+    <div className={cn("rounded-xl bg-card px-3 py-3 shadow-[var(--shadow-border)]", muted && "opacity-60")}>
+      <p className="text-sm font-medium leading-snug">{card.title}</p>
+      {card.checks?.length ? (
+        <ul className="mt-2 space-y-1">
+          {card.checks.map((item) => (
+            <li key={item.id} className="flex items-center gap-2 text-sm">
+              <ListMark done={item.done} />
+              <span className="min-w-0 truncate">{item.text}</span>
+            </li>
+          ))}
+        </ul>
+      ) : card.note ? (
+        <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{card.note}</p>
+      ) : null}
+      {card.doneAt ? (
+        <p className="mt-1.5 text-[11px] font-medium tracking-wide text-subtle">Done {formatDayYear(card.doneAt)}</p>
+      ) : null}
     </div>
   );
 }
@@ -79,12 +66,12 @@ function SortableCard({
   card,
   dndReady,
   onOpen,
-  onToggle,
+  onToggleItem,
 }: {
   card: KeelCard;
   dndReady: boolean;
   onOpen: (card: KeelCard) => void;
-  onToggle: (card: KeelCard) => void;
+  onToggleItem: (card: KeelCard, itemId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card.id,
@@ -107,20 +94,35 @@ function SortableCard({
         >
           <GripVertical className="size-4" />
         </button>
-        <div className="flex min-w-0 flex-1 items-start rounded-xl bg-card pl-1.5 shadow-[var(--shadow-border)]">
-          <button
-            type="button"
-            role="checkbox"
-            aria-checked={Boolean(card.doneAt)}
-            aria-label={card.doneAt ? `Uncheck ${card.title}` : `Check ${card.title}`}
-            className="mt-1.5 flex size-11 shrink-0 items-center justify-center"
-            onClick={() => onToggle(card)}
-          >
-            <CheckBox checked={Boolean(card.doneAt)} />
+        <div className="min-w-0 flex-1 rounded-xl bg-card px-3 py-3 shadow-[var(--shadow-border)]">
+          <button type="button" className="w-full text-left" onClick={() => onOpen(card)}>
+            <p className="text-sm font-medium leading-snug">{card.title}</p>
+            {card.note ? <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{card.note}</p> : null}
           </button>
-          <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onOpen(card)}>
-            <CardBody card={card} />
-          </button>
+          {card.checks?.length ? (
+            <ul className="mt-1.5">
+              {card.checks.map((item) => (
+                <li key={item.id} className="flex items-center">
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={item.done}
+                    aria-label={item.done ? `Uncheck ${item.text}` : `Check ${item.text}`}
+                    className="flex size-9 shrink-0 items-center justify-center"
+                    onClick={() => onToggleItem(card, item.id)}
+                  >
+                    <ListMark done={item.done} />
+                  </button>
+                  <button type="button" className="min-w-0 flex-1 truncate py-1.5 text-left text-sm" onClick={() => onOpen(card)}>
+                    {item.text}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {card.doneAt ? (
+            <p className="mt-1 text-[11px] font-medium tracking-wide text-subtle">Done {formatDayYear(card.doneAt)}</p>
+          ) : null}
         </div>
       </div>
     </div>
@@ -132,14 +134,14 @@ function ColumnDrop({
   cards,
   dndReady,
   onOpen,
-  onToggle,
+  onToggleItem,
   onAdd,
 }: {
   column: KeelColumn;
   cards: KeelCard[];
   dndReady: boolean;
   onOpen: (card: KeelCard) => void;
-  onToggle: (card: KeelCard) => void;
+  onToggleItem: (card: KeelCard, itemId: string) => void;
   onAdd: (columnId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging, isOver } =
@@ -210,7 +212,7 @@ function ColumnDrop({
         <div className="flex min-h-24 flex-1 flex-col gap-2">
           <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
             {cards.map((card) => (
-              <SortableCard key={card.id} card={card} dndReady={dndReady} onOpen={onOpen} onToggle={onToggle} />
+              <SortableCard key={card.id} card={card} dndReady={dndReady} onOpen={onOpen} onToggleItem={onToggleItem} />
             ))}
           </SortableContext>
         </div>
@@ -230,8 +232,112 @@ function ColumnDrop({
 }
 
 type EditorState =
-  | { mode: "new"; columnId: string; title: string; note: string; doneAt: string }
-  | { mode: "edit"; card: KeelCard; title: string; note: string; doneAt: string };
+  | { mode: "new"; columnId: string; title: string; note: string; doneAt: string; checks: KeelCheck[] }
+  | { mode: "edit"; card: KeelCard; title: string; note: string; doneAt: string; checks: KeelCheck[] };
+
+function ChecklistFields({
+  items,
+  onChange,
+}: {
+  items: KeelCheck[];
+  onChange: (next: KeelCheck[]) => void;
+}) {
+  const rowRefs = useRef(new Map<string, HTMLInputElement>());
+  const focusId = useRef<string | null>(null);
+
+  useEffect(() => {
+    const id = focusId.current;
+    if (!id) return;
+    focusId.current = null;
+    const el = rowRefs.current.get(id);
+    if (!el) return;
+    el.focus();
+    const end = el.value.length;
+    el.setSelectionRange(end, end);
+  });
+
+  function focus(id: string) {
+    focusId.current = id;
+  }
+
+  function addFromDraft(value: string) {
+    const lines = value
+      .split(/\r?\n/)
+      .map((line) => line.trim().slice(0, 80))
+      .filter(Boolean)
+      .slice(0, 40 - items.length);
+    if (!lines.length) return;
+    const added = lines.map((text) => ({ id: crypto.randomUUID(), text, done: false }));
+    onChange([...items, ...added]);
+    focus(added[added.length - 1]!.id);
+  }
+
+  function remove(id: string) {
+    const index = items.findIndex((item) => item.id === id);
+    const next = items.filter((item) => item.id !== id);
+    onChange(next);
+    const prev = next[index - 1];
+    focus(prev ? prev.id : "draft");
+  }
+
+  const rows = [...items, { id: "draft", text: "", done: false }];
+
+  return (
+    <ul>
+      {rows.map((item, index) => {
+        const isDraft = item.id === "draft";
+        return (
+          <li key={item.id} className="flex items-center">
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={item.done}
+              aria-label={isDraft ? "New item" : item.done ? `Uncheck ${item.text}` : `Check ${item.text}`}
+              className="flex size-11 shrink-0 items-center justify-center"
+              onClick={() => {
+                if (isDraft) return;
+                onChange(items.map((row) => (row.id === item.id ? { ...row, done: !row.done } : row)));
+              }}
+            >
+              <ListMark done={item.done} />
+            </button>
+            <input
+              ref={(node) => {
+                if (node) rowRefs.current.set(item.id, node);
+                else rowRefs.current.delete(item.id);
+              }}
+              value={item.text}
+              aria-label={isDraft ? "New item" : `Item ${index + 1}`}
+              maxLength={80}
+              className="h-11 min-w-0 flex-1 bg-transparent text-base text-foreground outline-none placeholder:text-subtle"
+              onChange={(event) => {
+                const value = event.target.value;
+                if (isDraft) {
+                  addFromDraft(value);
+                  return;
+                }
+                onChange(items.map((row) => (row.id === item.id ? { ...row, text: value.slice(0, 80) } : row)));
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  const next = items[index + 1];
+                  if (!isDraft && next) focus(next.id);
+                  else rowRefs.current.get("draft")?.focus();
+                  return;
+                }
+                if (event.key === "Backspace" && !isDraft && item.text === "") {
+                  event.preventDefault();
+                  remove(item.id);
+                }
+              }}
+            />
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 function CardEditor({
   editor,
@@ -311,43 +417,34 @@ function CardEditor({
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-5">
-          <div className="grid gap-1.5">
-            <Label htmlFor="card-title">Title</Label>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                role="checkbox"
-                aria-checked={Boolean(editor.doneAt)}
-                aria-label={editor.doneAt ? "Uncheck" : "Check"}
-                className="flex size-11 shrink-0 items-center justify-center"
-                onClick={() => onChange({ ...editor, doneAt: editor.doneAt ? "" : todayIso() })}
-              >
-                <CheckBox checked={Boolean(editor.doneAt)} />
-              </button>
-              <Input
-                ref={titleRef}
-                id="card-title"
-                value={editor.title}
-                onChange={(event) => onChange({ ...editor, title: event.target.value })}
-                maxLength={120}
-                placeholder="What needs doing"
-                autoComplete="off"
-                className={cn(editor.doneAt && "text-muted-foreground line-through")}
-              />
-            </div>
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col gap-1.5">
-            <Label htmlFor="card-note">Note</Label>
-            <textarea
-              id="card-note"
-              value={editor.note}
-              onChange={(event) => onChange({ ...editor, note: event.target.value })}
-              maxLength={400}
-              placeholder="Optional detail"
-              className="min-h-32 w-full flex-1 resize-none rounded-lg border border-input bg-background px-3 py-3 text-base text-foreground shadow-[var(--shadow-border)] outline-none placeholder:text-subtle focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
-            />
-          </div>
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
+          <input
+            ref={titleRef}
+            id="card-title"
+            value={editor.title}
+            onChange={(event) => onChange({ ...editor, title: event.target.value })}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                event.currentTarget.form?.querySelector<HTMLInputElement>('input[aria-label="New item"]')?.focus();
+              }
+            }}
+            maxLength={120}
+            placeholder="List"
+            autoComplete="off"
+            aria-label="Title"
+            className="w-full bg-transparent text-3xl font-semibold tracking-tight text-foreground outline-none placeholder:text-subtle"
+          />
+          <ChecklistFields items={editor.checks} onChange={(checks) => onChange({ ...editor, checks })} />
+          <textarea
+            id="card-note"
+            value={editor.note}
+            onChange={(event) => onChange({ ...editor, note: event.target.value })}
+            maxLength={400}
+            placeholder="Note"
+            aria-label="Note"
+            className="min-h-16 w-full resize-none bg-transparent px-1 py-2 text-base text-foreground outline-none placeholder:text-subtle"
+          />
           {showDone ? (
             <div className="grid gap-1.5">
               <Label htmlFor="card-done">Done date</Label>
@@ -490,12 +587,18 @@ export function KeelBoard() {
     if (!title) return;
     if (editor.mode === "new") {
       const created = addCard(editor.columnId, title, editor.note);
-      if (created && editor.doneAt) updateCard(created.id, { doneAt: editor.doneAt });
+      if (created) {
+        updateCard(created.id, {
+          doneAt: editor.doneAt || null,
+          checks: editor.checks,
+        });
+      }
     } else {
       updateCard(editor.card.id, {
         title,
         note: editor.note,
         doneAt: editor.doneAt || null,
+        checks: editor.checks,
       });
     }
     setEditor(null);
@@ -613,9 +716,16 @@ export function KeelBoard() {
                       title: card.title,
                       note: card.note ?? "",
                       doneAt: card.doneAt ?? "",
+                      checks: card.checks ?? [],
                     })
                   }
-                  onToggle={(card) => updateCard(card.id, { doneAt: card.doneAt ? null : todayIso() })}
+                  onToggleItem={(card, itemId) =>
+                    updateCard(card.id, {
+                      checks: (card.checks ?? []).map((item) =>
+                        item.id === itemId ? { ...item, done: !item.done } : item,
+                      ),
+                    })
+                  }
                   onAdd={(columnId) => {
                     const col = columns.find((c) => c.id === columnId);
                     const today = new Date();
@@ -626,6 +736,7 @@ export function KeelBoard() {
                       title: "",
                       note: "",
                       doneAt: col && isDoneColumn(col) ? iso : "",
+                      checks: [],
                     });
                   }}
                 />

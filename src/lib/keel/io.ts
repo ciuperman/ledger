@@ -1,5 +1,5 @@
 import { parseCsv } from "@/lib/ledger/csv";
-import type { KeelCard, KeelColumn, KeelSnapshot } from "./types";
+import type { KeelCard, KeelCheck, KeelColumn, KeelSnapshot } from "./types";
 import { asSnapshot } from "./store";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -7,6 +7,23 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 function stamp(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function packChecks(items: KeelCheck[] | undefined): string {
+  if (!items?.length) return "";
+  return items.map((item) => `${item.done ? "1" : "0"}:${item.text.replaceAll("|", "/")}`).join("|");
+}
+
+function unpackChecks(value: string): KeelCheck[] | undefined {
+  const out: KeelCheck[] = [];
+  for (const part of value.split("|")) {
+    if (!part.startsWith("0:") && !part.startsWith("1:")) continue;
+    const text = part.slice(2).trim().slice(0, 80);
+    if (!text) continue;
+    out.push({ id: crypto.randomUUID(), text, done: part.startsWith("1:") });
+    if (out.length >= 40) break;
+  }
+  return out.length ? out : undefined;
 }
 
 export function keelExportName(): string {
@@ -36,7 +53,7 @@ export function keelToCsv(snap: KeelSnapshot): string {
   const cards = [...snap.cards].sort(
     (a, b) => (order.get(a.columnId) ?? 99) - (order.get(b.columnId) ?? 99),
   );
-  const lines = ["Column,Title,Note,Done"];
+  const lines = ["Column,Title,Note,Done,Checks"];
   for (const card of cards) {
     lines.push(
       [
@@ -44,6 +61,7 @@ export function keelToCsv(snap: KeelSnapshot): string {
         csvField(card.title),
         csvField(card.note ?? ""),
         card.doneAt ?? "",
+        csvField(packChecks(card.checks)),
       ].join(","),
     );
   }
@@ -67,12 +85,14 @@ export function keelFromCsv(text: string): KeelSnapshot {
   let titleIndex = 1;
   let noteIndex = 2;
   let doneIndex = 3;
+  let checksIndex = -1;
   if (head.includes("title") || head.includes("column")) {
     start = 1;
     columnIndex = headerIndex(head, ["column", "list", "status"]);
     titleIndex = headerIndex(head, ["title", "card", "task"]);
     noteIndex = headerIndex(head, ["note", "notes", "detail"]);
     doneIndex = headerIndex(head, ["done", "done at", "date"]);
+    checksIndex = headerIndex(head, ["checks", "items"]);
     if (titleIndex < 0) throw new Error("Need a Title column.");
   }
   const columns: KeelColumn[] = [];
@@ -91,12 +111,14 @@ export function keelFromCsv(text: string): KeelSnapshot {
     }
     const note = noteIndex >= 0 ? (row[noteIndex] ?? "").trim().slice(0, 400) : "";
     const doneRaw = doneIndex >= 0 ? (row[doneIndex] ?? "").trim() : "";
+    const checksRaw = checksIndex >= 0 ? (row[checksIndex] ?? "").trim() : "";
     cards.push({
       id: crypto.randomUUID(),
       columnId,
       title,
       note: note || undefined,
       doneAt: ISO_DATE.test(doneRaw) ? doneRaw : undefined,
+      checks: unpackChecks(checksRaw),
     });
   }
   if (cards.length === 0) throw new Error("No cards in that CSV.");

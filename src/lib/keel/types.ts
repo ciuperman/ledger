@@ -1,11 +1,18 @@
 export type KeelColumnId = string;
 
+export type KeelCheck = {
+  id: string;
+  text: string;
+  done: boolean;
+};
+
 export type KeelCard = {
   id: string;
   columnId: KeelColumnId;
   title: string;
   note?: string;
   doneAt?: string;
+  checks?: KeelCheck[];
 };
 
 export type KeelColumn = {
