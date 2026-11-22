@@ -12,17 +12,9 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Download, GripVertical, Plus, Trash2, Upload } from "lucide-react";
+import { Download, GripVertical, Plus, Trash2, Upload, X } from "lucide-react";
 import { AppNav } from "@/components/app-nav";
 import { Button } from "@/components/ui/button";
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
-} from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { keelExportName, keelFromCsv, keelToCsv, parseKeelImport, snapshotFromState } from "@/lib/keel/io";
@@ -170,6 +162,140 @@ function ColumnDrop({
 type EditorState =
   | { mode: "new"; columnId: string; title: string; note: string; doneAt: string }
   | { mode: "edit"; card: KeelCard; title: string; note: string; doneAt: string };
+
+function CardEditor({
+  editor,
+  columnTitle,
+  showDone,
+  onChange,
+  onClose,
+  onSave,
+  onDelete,
+}: {
+  editor: EditorState;
+  columnTitle?: string;
+  showDone: boolean;
+  onChange: (next: EditorState) => void;
+  onClose: () => void;
+  onSave: () => void;
+  onDelete: () => void;
+}) {
+  const titleRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => titleRef.current?.focus(), 40);
+    return () => window.clearTimeout(id);
+  }, []);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const canSave = editor.title.trim().length > 0;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex bg-background/80 sm:items-start sm:justify-center sm:px-4 sm:pt-[10dvh] sm:pb-8"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="card-editor-title"
+        className="flex min-h-0 w-full flex-1 flex-col bg-card text-card-foreground sm:max-h-[min(40rem,80dvh)] sm:max-w-md sm:flex-none sm:rounded-2xl sm:shadow-[var(--shadow-border)]"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (canSave) onSave();
+        }}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex shrink-0 items-center gap-2 border-b border-border px-2 pt-[max(0.35rem,env(safe-area-inset-top))] sm:rounded-t-2xl sm:pt-2">
+          <div className="flex w-16 justify-start">
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="inline-flex size-11 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <X className="size-5" />
+            </button>
+          </div>
+          <div className="min-w-0 flex-1 text-center">
+            <h2 id="card-editor-title" className="truncate text-sm font-medium">
+              {editor.mode === "edit" ? "Edit card" : "New card"}
+            </h2>
+            {columnTitle ? (
+              <p className="truncate text-xs text-muted-foreground">{columnTitle}</p>
+            ) : null}
+          </div>
+          <div className="flex w-16 justify-end">
+            <Button type="submit" variant="ghost" size="sm" disabled={!canSave}>
+              Save
+            </Button>
+          </div>
+        </header>
+
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-5">
+          <div className="grid gap-1.5">
+            <Label htmlFor="card-title">Title</Label>
+            <Input
+              ref={titleRef}
+              id="card-title"
+              value={editor.title}
+              onChange={(event) => onChange({ ...editor, title: event.target.value })}
+              maxLength={120}
+              placeholder="What needs doing"
+              autoComplete="off"
+            />
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col gap-1.5">
+            <Label htmlFor="card-note">Note</Label>
+            <textarea
+              id="card-note"
+              value={editor.note}
+              onChange={(event) => onChange({ ...editor, note: event.target.value })}
+              maxLength={400}
+              placeholder="Optional detail"
+              className="min-h-32 w-full flex-1 resize-none rounded-lg border border-input bg-background px-3 py-3 text-base text-foreground shadow-[var(--shadow-border)] outline-none placeholder:text-subtle focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+            />
+          </div>
+          {showDone ? (
+            <div className="grid gap-1.5">
+              <Label htmlFor="card-done">Done date</Label>
+              <Input
+                id="card-done"
+                type="date"
+                value={editor.doneAt}
+                onChange={(event) => onChange({ ...editor, doneAt: event.target.value })}
+              />
+            </div>
+          ) : null}
+        </div>
+
+        {editor.mode === "edit" ? (
+          <div className="shrink-0 border-t border-border px-5 pt-3 safe-bottom sm:rounded-b-2xl">
+            <button
+              type="button"
+              onClick={onDelete}
+              className="inline-flex h-11 items-center gap-2 text-sm font-medium text-expense"
+            >
+              <Trash2 className="size-4" />
+              Delete card
+            </button>
+          </div>
+        ) : (
+          <div className="shrink-0 safe-bottom sm:rounded-b-2xl" />
+        )}
+      </form>
+    </div>
+  );
+}
 
 export function KeelBoard() {
   const hydrate = useKeel((s) => s.hydrate);
@@ -413,65 +539,20 @@ export function KeelBoard() {
         </div>
       </main>
 
-      <Drawer open={editor !== null} onOpenChange={(open) => !open && setEditor(null)}>
-        <DrawerContent>
-          <DrawerHeader>
-            <DrawerTitle>{editor?.mode === "edit" ? "Edit card" : "New card"}</DrawerTitle>
-            <DrawerDescription>Saved on this device with the rest of Keel.</DrawerDescription>
-          </DrawerHeader>
-          <div className="flex flex-col gap-4 px-5">
-            <div className="grid gap-1.5">
-              <Label htmlFor="card-title">Title</Label>
-              <Input
-                id="card-title"
-                value={editor?.title ?? ""}
-                onChange={(e) => setEditor((cur) => (cur ? { ...cur, title: e.target.value } : cur))}
-                maxLength={120}
-                placeholder="What needs doing"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="card-note">Note</Label>
-              <Input
-                id="card-note"
-                value={editor?.note ?? ""}
-                onChange={(e) => setEditor((cur) => (cur ? { ...cur, note: e.target.value } : cur))}
-                maxLength={400}
-                placeholder="Optional"
-              />
-            </div>
-            {editorIsDone ? (
-              <div className="grid gap-1.5">
-                <Label htmlFor="card-done">Done date</Label>
-                <Input
-                  id="card-done"
-                  type="date"
-                  value={editor?.doneAt ?? ""}
-                  onChange={(e) => setEditor((cur) => (cur ? { ...cur, doneAt: e.target.value } : cur))}
-                />
-              </div>
-            ) : null}
-          </div>
-          <DrawerFooter>
-            {editor?.mode === "edit" ? (
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={() => {
-                  if (editor.mode === "edit") deleteCard(editor.card.id);
-                  setEditor(null);
-                }}
-              >
-                <Trash2 />
-                Delete
-              </Button>
-            ) : null}
-            <Button type="button" onClick={saveEditor} disabled={!editor?.title.trim()}>
-              Save
-            </Button>
-          </DrawerFooter>
-        </DrawerContent>
-      </Drawer>
+      {editor ? (
+        <CardEditor
+          editor={editor}
+          columnTitle={editorColumn?.title}
+          showDone={editorIsDone}
+          onChange={setEditor}
+          onClose={() => setEditor(null)}
+          onSave={saveEditor}
+          onDelete={() => {
+            if (editor.mode === "edit") deleteCard(editor.card.id);
+            setEditor(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
