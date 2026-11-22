@@ -122,9 +122,6 @@ function applyDoneStamp(
   if (isDoneColumn(dest)) {
     return { ...card, columnId, doneAt: card.doneAt ?? todayIso() };
   }
-  if (card.columnId !== columnId) {
-    return { ...card, columnId, doneAt: undefined };
-  }
   return { ...card, columnId };
 }
 

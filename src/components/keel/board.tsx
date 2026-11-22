@@ -14,7 +14,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Download, GripVertical, Plus, Trash2, Upload, X } from "lucide-react";
+import { Check, Download, GripVertical, Plus, Trash2, Upload, X } from "lucide-react";
 import { AppNav } from "@/components/app-nav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,23 +25,52 @@ import type { KeelCard, KeelColumn } from "@/lib/keel/types";
 import { formatDayYear } from "@/lib/ledger/format";
 import { cn } from "@/lib/utils";
 
+function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function CheckBox({ checked }: { checked: boolean }) {
+  return (
+    <span
+      className={cn(
+        "flex size-[1.35rem] items-center justify-center rounded-[5px] border",
+        checked ? "border-income bg-income text-[#08090b]" : "border-subtle bg-transparent",
+      )}
+      aria-hidden
+    >
+      {checked ? <Check className="size-3.5" strokeWidth={3} /> : null}
+    </span>
+  );
+}
+
+function CardBody({ card }: { card: KeelCard }) {
+  const checked = Boolean(card.doneAt);
+  return (
+    <div className="min-w-0 flex-1 py-3 pr-3">
+      <p className={cn("text-sm font-medium leading-snug", checked && "text-muted-foreground line-through")}>
+        {card.title}
+      </p>
+      {card.note ? <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{card.note}</p> : null}
+      {card.doneAt ? (
+        <p className="mt-1.5 text-[11px] font-medium tracking-wide text-subtle">Done {formatDayYear(card.doneAt)}</p>
+      ) : null}
+    </div>
+  );
+}
+
 function CardFace({ card, muted }: { card: KeelCard; muted?: boolean }) {
   return (
     <div
       className={cn(
-        "rounded-xl bg-card px-3 py-3 shadow-[var(--shadow-border)]",
+        "flex items-start rounded-xl bg-card pl-1.5 shadow-[var(--shadow-border)]",
         muted && "opacity-60",
       )}
     >
-      <p className="text-sm font-medium leading-snug">{card.title}</p>
-      {card.note ? (
-        <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{card.note}</p>
-      ) : null}
-      {card.doneAt ? (
-        <p className="mt-1.5 text-[11px] font-medium tracking-wide text-subtle">
-          Done {formatDayYear(card.doneAt)}
-        </p>
-      ) : null}
+      <span className="mt-3 flex size-9 shrink-0 items-center justify-center">
+        <CheckBox checked={Boolean(card.doneAt)} />
+      </span>
+      <CardBody card={card} />
     </div>
   );
 }
@@ -50,10 +79,12 @@ function SortableCard({
   card,
   dndReady,
   onOpen,
+  onToggle,
 }: {
   card: KeelCard;
   dndReady: boolean;
   onOpen: (card: KeelCard) => void;
+  onToggle: (card: KeelCard) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card.id,
@@ -76,13 +107,21 @@ function SortableCard({
         >
           <GripVertical className="size-4" />
         </button>
-        <button
-          type="button"
-          className="min-w-0 flex-1 text-left"
-          onClick={() => onOpen(card)}
-        >
-          <CardFace card={card} />
-        </button>
+        <div className="flex min-w-0 flex-1 items-start rounded-xl bg-card pl-1.5 shadow-[var(--shadow-border)]">
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={Boolean(card.doneAt)}
+            aria-label={card.doneAt ? `Uncheck ${card.title}` : `Check ${card.title}`}
+            className="mt-1.5 flex size-11 shrink-0 items-center justify-center"
+            onClick={() => onToggle(card)}
+          >
+            <CheckBox checked={Boolean(card.doneAt)} />
+          </button>
+          <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onOpen(card)}>
+            <CardBody card={card} />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -93,12 +132,14 @@ function ColumnDrop({
   cards,
   dndReady,
   onOpen,
+  onToggle,
   onAdd,
 }: {
   column: KeelColumn;
   cards: KeelCard[];
   dndReady: boolean;
   onOpen: (card: KeelCard) => void;
+  onToggle: (card: KeelCard) => void;
   onAdd: (columnId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging, isOver } =
@@ -169,7 +210,7 @@ function ColumnDrop({
         <div className="flex min-h-24 flex-1 flex-col gap-2">
           <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
             {cards.map((card) => (
-              <SortableCard key={card.id} card={card} dndReady={dndReady} onOpen={onOpen} />
+              <SortableCard key={card.id} card={card} dndReady={dndReady} onOpen={onOpen} onToggle={onToggle} />
             ))}
           </SortableContext>
         </div>
@@ -273,15 +314,28 @@ function CardEditor({
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-5">
           <div className="grid gap-1.5">
             <Label htmlFor="card-title">Title</Label>
-            <Input
-              ref={titleRef}
-              id="card-title"
-              value={editor.title}
-              onChange={(event) => onChange({ ...editor, title: event.target.value })}
-              maxLength={120}
-              placeholder="What needs doing"
-              autoComplete="off"
-            />
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={Boolean(editor.doneAt)}
+                aria-label={editor.doneAt ? "Uncheck" : "Check"}
+                className="flex size-11 shrink-0 items-center justify-center"
+                onClick={() => onChange({ ...editor, doneAt: editor.doneAt ? "" : todayIso() })}
+              >
+                <CheckBox checked={Boolean(editor.doneAt)} />
+              </button>
+              <Input
+                ref={titleRef}
+                id="card-title"
+                value={editor.title}
+                onChange={(event) => onChange({ ...editor, title: event.target.value })}
+                maxLength={120}
+                placeholder="What needs doing"
+                autoComplete="off"
+                className={cn(editor.doneAt && "text-muted-foreground line-through")}
+              />
+            </div>
           </div>
           <div className="flex min-h-0 flex-1 flex-col gap-1.5">
             <Label htmlFor="card-note">Note</Label>
@@ -561,6 +615,7 @@ export function KeelBoard() {
                       doneAt: card.doneAt ?? "",
                     })
                   }
+                  onToggle={(card) => updateCard(card.id, { doneAt: card.doneAt ? null : todayIso() })}
                   onAdd={(columnId) => {
                     const col = columns.find((c) => c.id === columnId);
                     const today = new Date();
