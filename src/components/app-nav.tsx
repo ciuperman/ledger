@@ -1,7 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
-import { Check, LogOut } from "lucide-react";
-import { signOut } from "@/lib/auth/client";
+import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { BookId } from "@/lib/ledger/types";
 
@@ -12,31 +10,6 @@ function LogoMark() {
       <rect x="10" y="8" width="4" height="13" rx="1" fill="currentColor" />
       <rect x="17" y="4" width="4" height="17" rx="1" fill="currentColor" opacity="0.7" />
     </svg>
-  );
-}
-
-export function LogoutButton() {
-  const [busy, setBusy] = useState(false);
-  async function onClick() {
-    setBusy(true);
-    try {
-      await signOut("/login");
-    } catch {
-      setBusy(false);
-      window.alert("Ieșirea a eșuat. Încearcă din nou.");
-    }
-  }
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy}
-      title="Ieșire"
-      className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-60"
-    >
-      <LogOut className="size-3.5" />
-      {busy ? "…" : "Ieșire"}
-    </button>
   );
 }
 
@@ -70,7 +43,6 @@ export function AppNav({ book, persistOk }: { book: BookId; persistOk: boolean }
               Keel
             </Link>
           </nav>
-          <LogoutButton />
         </div>
         <p className="mt-0.5 flex items-center gap-1 text-xs text-subtle">
           {persistOk ? (
