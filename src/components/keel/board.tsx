@@ -48,9 +48,11 @@ function CardFace({ card, muted }: { card: KeelCard; muted?: boolean }) {
 
 function SortableCard({
   card,
+  dndReady,
   onOpen,
 }: {
   card: KeelCard;
+  dndReady: boolean;
   onOpen: (card: KeelCard) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -67,9 +69,10 @@ function SortableCard({
         <button
           type="button"
           className="flex w-8 shrink-0 items-center justify-center rounded-lg text-subtle touch-none"
+          style={{ touchAction: "none" }}
           aria-label="Drag card"
-          {...attributes}
-          {...listeners}
+          {...(dndReady ? attributes : {})}
+          {...(dndReady ? listeners : {})}
         >
           <GripVertical className="size-4" />
         </button>
@@ -88,11 +91,13 @@ function SortableCard({
 function ColumnDrop({
   column,
   cards,
+  dndReady,
   onOpen,
   onAdd,
 }: {
   column: KeelColumn;
   cards: KeelCard[];
+  dndReady: boolean;
   onOpen: (card: KeelCard) => void;
   onAdd: (columnId: string) => void;
 }) {
@@ -130,8 +135,8 @@ function ColumnDrop({
         className="flex w-11 shrink-0 touch-none items-center justify-center self-stretch rounded-l-2xl text-subtle active:scale-100"
         style={{ touchAction: "none" }}
         aria-label={`Move ${column.title}`}
-        {...attributes}
-        {...listeners}
+        {...(dndReady ? attributes : {})}
+        {...(dndReady ? listeners : {})}
       >
         <GripVertical className="size-4" />
       </button>
@@ -164,7 +169,7 @@ function ColumnDrop({
         <div className="flex min-h-24 flex-1 flex-col gap-2">
           <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
             {cards.map((card) => (
-              <SortableCard key={card.id} card={card} onOpen={onOpen} />
+              <SortableCard key={card.id} card={card} dndReady={dndReady} onOpen={onOpen} />
             ))}
           </SortableContext>
         </div>
@@ -336,6 +341,7 @@ export function KeelBoard() {
 
   const [activeCard, setActiveCard] = useState<KeelCard | null>(null);
   const [activeColumn, setActiveColumn] = useState<KeelColumn | null>(null);
+  const [dndReady, setDndReady] = useState(false);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [newCol, setNewCol] = useState("");
   const [ioMsg, setIoMsg] = useState<string | null>(null);
@@ -344,6 +350,10 @@ export function KeelBoard() {
   useLayoutEffect(() => {
     hydrate();
   }, [hydrate]);
+
+  useEffect(() => {
+    setDndReady(true);
+  }, []);
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
@@ -541,6 +551,7 @@ export function KeelBoard() {
                   key={column.id}
                   column={column}
                   cards={cardsByCol.get(column.id) ?? []}
+                  dndReady={dndReady}
                   onOpen={(card) =>
                     setEditor({
                       mode: "edit",
