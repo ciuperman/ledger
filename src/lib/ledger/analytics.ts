@@ -80,6 +80,10 @@ export type BalancePoint = {
   date: string;
   label: string;
   balance: number;
+  ma20: number | null;
+  ma50: number | null;
+  ma200: number | null;
+  rsi: number | null;
 };
 
 export type BudgetProgress = {
@@ -362,6 +366,43 @@ export function budgetProgress(
     .sort((a, b) => b.ratio - a.ratio || a.label.localeCompare(b.label));
 }
 
+function smaSeries(values: number[], period: number): (number | null)[] {
+  const out: (number | null)[] = [];
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    sum += values[i]!;
+    if (i >= period) sum -= values[i - period]!;
+    const used = Math.min(i + 1, period);
+    out.push(used < 2 ? null : sum / used);
+  }
+  return out;
+}
+
+/** Wilder RSI. `values` are the balance levels, like a price. */
+function rsiSeries(values: number[], period = 14): (number | null)[] {
+  const out: (number | null)[] = new Array(values.length).fill(null);
+  if (values.length <= period) return out;
+  let gain = 0;
+  let loss = 0;
+  for (let i = 1; i <= period; i++) {
+    const delta = values[i]! - values[i - 1]!;
+    if (delta >= 0) gain += delta;
+    else loss -= delta;
+  }
+  let avgGain = gain / period;
+  let avgLoss = loss / period;
+  out[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  for (let i = period + 1; i < values.length; i++) {
+    const delta = values[i]! - values[i - 1]!;
+    const up = delta > 0 ? delta : 0;
+    const down = delta < 0 ? -delta : 0;
+    avgGain = (avgGain * (period - 1) + up) / period;
+    avgLoss = (avgLoss * (period - 1) + down) / period;
+    out[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  }
+  return out;
+}
+
 export function balanceSeries(
   txs: Transaction[],
   range: DateWindow,
@@ -372,29 +413,51 @@ export function balanceSeries(
   );
   const startIso = format(range.start, "yyyy-MM-dd");
   const endIso = format(range.end, "yyyy-MM-dd");
+  const firstMs = sorted[0] ? new Date(`${sorted[0].date}T00:00:00`).getTime() : range.start.getTime();
+  const historyStart = startOfDay(new Date(Math.max(firstMs, subDays(range.start, 200).getTime())));
+  const historyIso = format(historyStart, "yyyy-MM-dd");
   let bal = 0;
   if (!focused) {
     for (const tx of sorted) {
-      if (tx.date < startIso) bal += signedAmount(tx.type, tx.amount);
+      if (tx.date < historyIso) bal += signedAmount(tx.type, tx.amount);
     }
   }
   const delta = new Map<string, number>();
   for (const tx of sorted) {
-    if (tx.date < startIso || tx.date > endIso) continue;
+    if (tx.date < historyIso || tx.date > endIso) continue;
     delta.set(tx.date, (delta.get(tx.date) ?? 0) + signedAmount(tx.type, tx.amount));
   }
   const days = eachDayOfInterval({
-    start: startOfDay(range.start),
+    start: historyStart,
     end: startOfDay(range.end),
   });
-  const span = days.length;
-  return days.map((d) => {
+  const balances: number[] = [];
+  for (const d of days) {
     const iso = format(d, "yyyy-MM-dd");
     bal += delta.get(iso) ?? 0;
-    const label =
-      span <= 40 ? format(d, "d MMM") : span <= 120 ? format(d, "d MMM") : format(d, "MMM");
-    return { date: iso, label, balance: bal };
-  });
+    balances.push(bal);
+  }
+  const ma20 = smaSeries(balances, 20);
+  const ma50 = smaSeries(balances, 50);
+  const ma200 = smaSeries(balances, 200);
+  const rsi = rsiSeries(balances);
+  const span = differenceInCalendarDays(range.end, range.start) + 1;
+  const points: BalancePoint[] = [];
+  for (let index = 0; index < days.length; index++) {
+    const d = days[index]!;
+    const iso = format(d, "yyyy-MM-dd");
+    if (iso < startIso) continue;
+    points.push({
+      date: iso,
+      label: span <= 120 ? format(d, "d MMM") : format(d, "MMM"),
+      balance: balances[index]!,
+      ma20: ma20[index] ?? null,
+      ma50: ma50[index] ?? null,
+      ma200: ma200[index] ?? null,
+      rsi: rsi[index] ?? null,
+    });
+  }
+  return points;
 }
 
 function iterateBuckets(

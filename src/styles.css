@@ -39,6 +39,10 @@
   --color-subtle: #5c636c;
   --color-chart-line: #c5ccd6;
   --color-chart-grid: #23272e;
+  --color-ma-20: #d6b25e;
+  --color-ma-50: #6aaed6;
+  --color-ma-200: #c08984;
+  --color-rsi: #b7a4d4;
 
   --radius-sm: 0.375rem;
   --radius-md: 0.5rem;
