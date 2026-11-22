@@ -14,7 +14,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Check, Download, GripVertical, Plus, Trash2, Upload, X } from "lucide-react";
+import { Check, Download, GripVertical, ListTodo, Plus, Trash2, Upload, X } from "lucide-react";
 import { AppNav } from "@/components/app-nav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -231,9 +231,16 @@ function ColumnDrop({
   );
 }
 
-type EditorState =
-  | { mode: "new"; columnId: string; title: string; note: string; doneAt: string; checks: KeelCheck[] }
-  | { mode: "edit"; card: KeelCard; title: string; note: string; doneAt: string; checks: KeelCheck[] };
+type EditorState = {
+  mode: "new" | "edit";
+  columnId: string;
+  card?: KeelCard;
+  title: string;
+  note: string;
+  doneAt: string;
+  checks: KeelCheck[];
+  list: boolean;
+};
 
 function ChecklistFields({
   items,
@@ -373,6 +380,23 @@ function CardEditor({
 
   const canSave = editor.title.trim().length > 0;
 
+  function toggleList() {
+    if (editor.list) {
+      const lines = editor.checks.map((item) => item.text.trim()).filter(Boolean);
+      const note = [editor.note.trim(), ...lines].filter(Boolean).join("\n").slice(0, 400);
+      onChange({ ...editor, list: false, checks: [], note });
+      return;
+    }
+    const lines = editor.note
+      .split(/\r?\n/)
+      .map((line) => line.trim().slice(0, 80))
+      .filter(Boolean);
+    const checks = editor.checks.length
+      ? editor.checks
+      : lines.map((text) => ({ id: crypto.randomUUID(), text, done: false }));
+    onChange({ ...editor, list: true, checks, note: "" });
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex bg-background/80 sm:items-start sm:justify-center sm:px-4 sm:pt-[10dvh] sm:pb-8"
@@ -430,21 +454,24 @@ function CardEditor({
               }
             }}
             maxLength={120}
-            placeholder="List"
+            placeholder="Title"
             autoComplete="off"
             aria-label="Title"
             className="w-full bg-transparent text-3xl font-semibold tracking-tight text-foreground outline-none placeholder:text-subtle"
           />
-          <ChecklistFields items={editor.checks} onChange={(checks) => onChange({ ...editor, checks })} />
-          <textarea
-            id="card-note"
-            value={editor.note}
-            onChange={(event) => onChange({ ...editor, note: event.target.value })}
-            maxLength={400}
-            placeholder="Note"
-            aria-label="Note"
-            className="min-h-16 w-full resize-none bg-transparent px-1 py-2 text-base text-foreground outline-none placeholder:text-subtle"
-          />
+          {editor.list ? (
+            <ChecklistFields items={editor.checks} onChange={(checks) => onChange({ ...editor, checks })} />
+          ) : (
+            <textarea
+              id="card-note"
+              value={editor.note}
+              onChange={(event) => onChange({ ...editor, note: event.target.value })}
+              maxLength={400}
+              placeholder="Scrie"
+              aria-label="Note"
+              className="min-h-40 w-full flex-1 resize-none bg-transparent py-2 text-base text-foreground outline-none placeholder:text-subtle"
+            />
+          )}
           {showDone ? (
             <div className="grid gap-1.5">
               <Label htmlFor="card-done">Done date</Label>
@@ -458,20 +485,33 @@ function CardEditor({
           ) : null}
         </div>
 
-        {editor.mode === "edit" ? (
-          <div className="shrink-0 border-t border-border px-5 pt-3 safe-bottom sm:rounded-b-2xl">
+        <div className="shrink-0 border-t border-border px-3 pt-2 safe-bottom sm:rounded-b-2xl">
+          <div className="mb-1 flex items-center">
+            <button
+              type="button"
+              aria-pressed={editor.list}
+              aria-label="Listă"
+              onClick={toggleList}
+              className={cn(
+                "inline-flex h-11 items-center gap-2 rounded-full px-3 text-sm font-medium",
+                editor.list ? "bg-[#e3b23c] text-[#1a1404]" : "text-foreground",
+              )}
+            >
+              <ListTodo className="size-5" />
+              Listă
+            </button>
+          </div>
+          {editor.mode === "edit" ? (
             <button
               type="button"
               onClick={onDelete}
-              className="inline-flex h-11 items-center gap-2 text-sm font-medium text-expense"
+              className="inline-flex h-11 items-center gap-2 px-2 text-sm font-medium text-expense"
             >
               <Trash2 className="size-4" />
               Delete card
             </button>
-          </div>
-        ) : (
-          <div className="shrink-0 safe-bottom sm:rounded-b-2xl" />
-        )}
+          ) : null}
+        </div>
       </form>
     </div>
   );
@@ -524,7 +564,7 @@ export function KeelBoard() {
   const editorColumn = editor
     ? editor.mode === "new"
       ? columns.find((c) => c.id === editor.columnId)
-      : columns.find((c) => c.id === editor.card.columnId)
+      : columns.find((c) => c.id === editor.card?.columnId)
     : undefined;
   const editorIsDone = editorColumn ? isDoneColumn(editorColumn) : Boolean(editor?.doneAt);
 
@@ -590,15 +630,15 @@ export function KeelBoard() {
       if (created) {
         updateCard(created.id, {
           doneAt: editor.doneAt || null,
-          checks: editor.checks,
+          checks: editor.list ? editor.checks : [],
         });
       }
-    } else {
+    } else if (editor.card) {
       updateCard(editor.card.id, {
         title,
         note: editor.note,
         doneAt: editor.doneAt || null,
-        checks: editor.checks,
+        checks: editor.list ? editor.checks : [],
       });
     }
     setEditor(null);
@@ -712,11 +752,13 @@ export function KeelBoard() {
                   onOpen={(card) =>
                     setEditor({
                       mode: "edit",
+                      columnId: card.columnId,
                       card,
                       title: card.title,
                       note: card.note ?? "",
                       doneAt: card.doneAt ?? "",
                       checks: card.checks ?? [],
+                      list: Boolean(card.checks?.length),
                     })
                   }
                   onToggleItem={(card, itemId) =>
@@ -737,6 +779,7 @@ export function KeelBoard() {
                       note: "",
                       doneAt: col && isDoneColumn(col) ? iso : "",
                       checks: [],
+                      list: false,
                     });
                   }}
                 />
@@ -787,7 +830,7 @@ export function KeelBoard() {
           onClose={() => setEditor(null)}
           onSave={saveEditor}
           onDelete={() => {
-            if (editor.mode === "edit") deleteCard(editor.card.id);
+            if (editor.mode === "edit" && editor.card) deleteCard(editor.card.id);
             setEditor(null);
           }}
         />
