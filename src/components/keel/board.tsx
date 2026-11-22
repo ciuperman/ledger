@@ -2,11 +2,13 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
+  closestCenter,
   closestCorners,
-  useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
@@ -94,10 +96,11 @@ function ColumnDrop({
   onOpen: (card: KeelCard) => void;
   onAdd: (columnId: string) => void;
 }) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: column.id,
-    data: { type: "column", columnId: column.id },
-  });
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging, isOver } =
+    useSortable({
+      id: column.id,
+      data: { type: "column", column },
+    });
   const renameColumn = useKeel((s) => s.renameColumn);
   const deleteColumn = useKeel((s) => s.deleteColumn);
   const [title, setTitle] = useState(column.title);
@@ -106,55 +109,76 @@ function ColumnDrop({
     setTitle(column.title);
   }, [column.title]);
 
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
   return (
     <section
+      ref={setNodeRef}
+      style={style}
       className={cn(
-        "flex w-full flex-col rounded-2xl bg-muted/60 p-3",
-        isOver && "shadow-[var(--shadow-border-hover)]",
+        "flex w-full rounded-2xl bg-muted/60",
+        isDragging && "z-10 opacity-40",
+        isOver && !isDragging && "shadow-[var(--shadow-border-hover)]",
       )}
     >
-      <div className="mb-2 flex items-center gap-1">
-        <Input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={() => {
-            if (title.trim() && title.trim() !== column.title) renameColumn(column.id, title);
-            else setTitle(column.title);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-          }}
-          className="h-10 min-h-10 border-transparent bg-transparent px-2 text-sm font-medium shadow-none"
-          aria-label={`${column.title} column name`}
-        />
+      <button
+        type="button"
+        ref={setActivatorNodeRef}
+        className="flex w-11 shrink-0 touch-none items-center justify-center self-stretch rounded-l-2xl text-subtle active:scale-100"
+        style={{ touchAction: "none" }}
+        aria-label={`Move ${column.title}`}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="size-4" />
+      </button>
+      <div className="flex min-w-0 flex-1 flex-col py-3 pr-3">
+        <div className="mb-2 flex items-center gap-1">
+          <Input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => {
+              if (title.trim() && title.trim() !== column.title) renameColumn(column.id, title);
+              else setTitle(column.title);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            }}
+            className="h-10 min-h-10 border-transparent bg-transparent px-2 text-sm font-medium shadow-none"
+            aria-label={`${column.title} column name`}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="shrink-0 text-subtle hover:text-expense"
+            aria-label={`Delete ${column.title}`}
+            onClick={() => deleteColumn(column.id)}
+          >
+            <Trash2 />
+          </Button>
+        </div>
+        <div className="flex min-h-24 flex-1 flex-col gap-2">
+          <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+            {cards.map((card) => (
+              <SortableCard key={card.id} card={card} onOpen={onOpen} />
+            ))}
+          </SortableContext>
+        </div>
         <Button
           type="button"
           variant="ghost"
-          size="icon-sm"
-          className="shrink-0 text-subtle hover:text-expense"
-          aria-label={`Delete ${column.title}`}
-          onClick={() => deleteColumn(column.id)}
+          size="sm"
+          className="mt-2 justify-start text-muted-foreground"
+          onClick={() => onAdd(column.id)}
         >
-          <Trash2 />
+          <Plus />
+          Add card
         </Button>
       </div>
-      <div ref={setNodeRef} className="flex min-h-24 flex-1 flex-col gap-2">
-        <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
-          {cards.map((card) => (
-            <SortableCard key={card.id} card={card} onOpen={onOpen} />
-          ))}
-        </SortableContext>
-      </div>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="mt-2 justify-start text-muted-foreground"
-        onClick={() => onAdd(column.id)}
-      >
-        <Plus />
-        Add card
-      </Button>
     </section>
   );
 }
@@ -307,9 +331,11 @@ export function KeelBoard() {
   const updateCard = useKeel((s) => s.updateCard);
   const deleteCard = useKeel((s) => s.deleteCard);
   const moveCard = useKeel((s) => s.moveCard);
+  const moveColumn = useKeel((s) => s.moveColumn);
   const replaceBoard = useKeel((s) => s.replaceBoard);
 
-  const [active, setActive] = useState<KeelCard | null>(null);
+  const [activeCard, setActiveCard] = useState<KeelCard | null>(null);
+  const [activeColumn, setActiveColumn] = useState<KeelColumn | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [newCol, setNewCol] = useState("");
   const [ioMsg, setIoMsg] = useState<string | null>(null);
@@ -320,7 +346,8 @@ export function KeelBoard() {
   }, [hydrate]);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { distance: 8 } }),
   );
 
   const cardsByCol = useMemo(() => {
@@ -340,15 +367,40 @@ export function KeelBoard() {
     : undefined;
   const editorIsDone = editorColumn ? isDoneColumn(editorColumn) : Boolean(editor?.doneAt);
 
+  const collisionDetection: CollisionDetection = (args) => {
+    if (args.active.data.current?.type === "column") {
+      return closestCenter({
+        ...args,
+        droppableContainers: args.droppableContainers.filter(
+          (container) => container.data.current?.type === "column",
+        ),
+      });
+    }
+    return closestCorners(args);
+  };
+
   function onDragStart(event: DragStartEvent) {
-    const card = event.active.data.current?.card as KeelCard | undefined;
-    if (card) setActive(card);
+    const data = event.active.data.current;
+    if (data?.type === "column") {
+      setActiveColumn(data.column as KeelColumn);
+      return;
+    }
+    const card = data?.card as KeelCard | undefined;
+    if (card) setActiveCard(card);
   }
 
   function onDragEnd(event: DragEndEvent) {
-    setActive(null);
+    setActiveCard(null);
+    setActiveColumn(null);
     const { active: a, over } = event;
-    if (!over) return;
+    if (!over || a.id === over.id) return;
+    if (a.data.current?.type === "column") {
+      const from = columns.findIndex((c) => c.id === String(a.id));
+      const to = columns.findIndex((c) => c.id === String(over.id));
+      if (from < 0 || to < 0) return;
+      moveColumn(String(a.id), to);
+      return;
+    }
     const cardId = String(a.id);
     const overId = String(over.id);
     const overColumn = columns.some((c) => c.id === overId)
@@ -475,41 +527,51 @@ export function KeelBoard() {
         <div className="flex flex-col gap-4">
           <DndContext
             sensors={sensors}
-            collisionDetection={closestCorners}
+            collisionDetection={collisionDetection}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
-            onDragCancel={() => setActive(null)}
+            onDragCancel={() => {
+              setActiveCard(null);
+              setActiveColumn(null);
+            }}
           >
-            {columns.map((column) => (
-              <ColumnDrop
-                key={column.id}
-                column={column}
-                cards={cardsByCol.get(column.id) ?? []}
-                onOpen={(card) =>
-                  setEditor({
-                    mode: "edit",
-                    card,
-                    title: card.title,
-                    note: card.note ?? "",
-                    doneAt: card.doneAt ?? "",
-                  })
-                }
-                onAdd={(columnId) => {
-                  const col = columns.find((c) => c.id === columnId);
-                  const today = new Date();
-                  const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-                  setEditor({
-                    mode: "new",
-                    columnId,
-                    title: "",
-                    note: "",
-                    doneAt: col && isDoneColumn(col) ? iso : "",
-                  });
-                }}
-              />
-            ))}
+            <SortableContext items={columns.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+              {columns.map((column) => (
+                <ColumnDrop
+                  key={column.id}
+                  column={column}
+                  cards={cardsByCol.get(column.id) ?? []}
+                  onOpen={(card) =>
+                    setEditor({
+                      mode: "edit",
+                      card,
+                      title: card.title,
+                      note: card.note ?? "",
+                      doneAt: card.doneAt ?? "",
+                    })
+                  }
+                  onAdd={(columnId) => {
+                    const col = columns.find((c) => c.id === columnId);
+                    const today = new Date();
+                    const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+                    setEditor({
+                      mode: "new",
+                      columnId,
+                      title: "",
+                      note: "",
+                      doneAt: col && isDoneColumn(col) ? iso : "",
+                    });
+                  }}
+                />
+              ))}
+            </SortableContext>
             <DragOverlay>
-              {active ? <CardFace card={active} /> : null}
+              {activeCard ? <CardFace card={activeCard} /> : null}
+              {activeColumn ? (
+                <div className="rounded-2xl bg-card px-4 py-3 shadow-[var(--shadow-border-hover)]">
+                  <p className="text-sm font-medium">{activeColumn.title}</p>
+                </div>
+              ) : null}
             </DragOverlay>
           </DndContext>
 

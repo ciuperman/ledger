@@ -141,6 +141,7 @@ type KeelState = {
   updateCard: (id: string, patch: { title?: string; note?: string; doneAt?: string | null }) => boolean;
   deleteCard: (id: string) => void;
   moveCard: (cardId: string, columnId: KeelColumnId, index: number) => void;
+  moveColumn: (columnId: KeelColumnId, toIndex: number) => void;
   replaceBoard: (snap: KeelSnapshot) => boolean;
 };
 
@@ -273,6 +274,16 @@ export const useKeel = create<KeelState>((_set, get) => ({
     const cards = [...without];
     cards.splice(at, 0, next);
     commit({ cards });
+  },
+
+  moveColumn: (columnId, toIndex) => {
+    const columns = get().columns;
+    const from = columns.findIndex((c) => c.id === columnId);
+    if (from < 0 || toIndex < 0 || toIndex >= columns.length || from === toIndex) return;
+    const next = columns.slice();
+    const [row] = next.splice(from, 1);
+    next.splice(toIndex, 0, row!);
+    commit({ columns: next });
   },
 
   replaceBoard: (snap) => {
