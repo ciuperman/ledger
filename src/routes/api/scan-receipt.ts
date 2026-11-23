@@ -141,10 +141,8 @@ export const Route = createFileRoute("/api/scan-receipt")({
     handlers: {
       POST: async ({ request }) => {
         const { assertSameSiteRequest } = await import("@/lib/auth/isolation.server");
-        const { requireUserId } = await import("@/lib/auth/verify.server");
         try {
           assertSameSiteRequest();
-          await requireUserId();
         } catch {
           return new Response("Unauthorized", { status: 401 });
         }
