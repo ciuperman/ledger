@@ -22,7 +22,6 @@ import { Label } from "@/components/ui/label";
 import { keelExportName, keelFromCsv, keelToCsv, parseKeelImport, snapshotFromState } from "@/lib/keel/io";
 import { isDoneColumn, useKeel } from "@/lib/keel/store";
 import type { KeelCard, KeelCheck, KeelColumn } from "@/lib/keel/types";
-import { formatDayYear } from "@/lib/ledger/format";
 import { cn } from "@/lib/utils";
 
 function ListMark({ done }: { done: boolean }) {
@@ -39,24 +38,19 @@ function ListMark({ done }: { done: boolean }) {
   );
 }
 
+function listHint(checks: KeelCheck[]): string {
+  const done = checks.filter((item) => item.done).length;
+  return `${done}/${checks.length}`;
+}
+
 function CardFace({ card, muted }: { card: KeelCard; muted?: boolean }) {
   return (
     <div className={cn("rounded-xl bg-card px-3 py-3 shadow-[var(--shadow-border)]", muted && "opacity-60")}>
-      <p className="text-sm font-medium leading-snug">{card.title}</p>
+      <p className="truncate text-sm font-medium leading-snug">{card.title}</p>
       {card.checks?.length ? (
-        <ul className="mt-2 space-y-1">
-          {card.checks.map((item) => (
-            <li key={item.id} className="flex items-center gap-2 text-sm">
-              <ListMark done={item.done} />
-              <span className="min-w-0 truncate">{item.text}</span>
-            </li>
-          ))}
-        </ul>
+        <p className="mt-1 text-xs text-muted-foreground">{listHint(card.checks)}</p>
       ) : card.note ? (
-        <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{card.note}</p>
-      ) : null}
-      {card.doneAt ? (
-        <p className="mt-1.5 text-[11px] font-medium tracking-wide text-subtle">Done {formatDayYear(card.doneAt)}</p>
+        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{card.note}</p>
       ) : null}
     </div>
   );
@@ -66,12 +60,10 @@ function SortableCard({
   card,
   dndReady,
   onOpen,
-  onToggleItem,
 }: {
   card: KeelCard;
   dndReady: boolean;
   onOpen: (card: KeelCard) => void;
-  onToggleItem: (card: KeelCard, itemId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card.id,
@@ -94,36 +86,18 @@ function SortableCard({
         >
           <GripVertical className="size-4" />
         </button>
-        <div className="min-w-0 flex-1 rounded-xl bg-card px-3 py-3 shadow-[var(--shadow-border)]">
-          <button type="button" className="w-full text-left" onClick={() => onOpen(card)}>
-            <p className="text-sm font-medium leading-snug">{card.title}</p>
-            {card.note ? <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{card.note}</p> : null}
-          </button>
+        <button
+          type="button"
+          className="min-w-0 flex-1 rounded-xl bg-card px-3 py-3 text-left shadow-[var(--shadow-border)]"
+          onClick={() => onOpen(card)}
+        >
+          <p className="truncate text-sm font-medium leading-snug">{card.title}</p>
           {card.checks?.length ? (
-            <ul className="mt-1.5">
-              {card.checks.map((item) => (
-                <li key={item.id} className="flex items-center">
-                  <button
-                    type="button"
-                    role="checkbox"
-                    aria-checked={item.done}
-                    aria-label={item.done ? `Uncheck ${item.text}` : `Check ${item.text}`}
-                    className="flex size-9 shrink-0 items-center justify-center"
-                    onClick={() => onToggleItem(card, item.id)}
-                  >
-                    <ListMark done={item.done} />
-                  </button>
-                  <button type="button" className="min-w-0 flex-1 truncate py-1.5 text-left text-sm" onClick={() => onOpen(card)}>
-                    {item.text}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <p className="mt-1 text-xs text-muted-foreground">{listHint(card.checks)}</p>
+          ) : card.note ? (
+            <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{card.note}</p>
           ) : null}
-          {card.doneAt ? (
-            <p className="mt-1 text-[11px] font-medium tracking-wide text-subtle">Done {formatDayYear(card.doneAt)}</p>
-          ) : null}
-        </div>
+        </button>
       </div>
     </div>
   );
@@ -134,14 +108,12 @@ function ColumnDrop({
   cards,
   dndReady,
   onOpen,
-  onToggleItem,
   onAdd,
 }: {
   column: KeelColumn;
   cards: KeelCard[];
   dndReady: boolean;
   onOpen: (card: KeelCard) => void;
-  onToggleItem: (card: KeelCard, itemId: string) => void;
   onAdd: (columnId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging, isOver } =
@@ -212,7 +184,7 @@ function ColumnDrop({
         <div className="flex min-h-24 flex-1 flex-col gap-2">
           <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
             {cards.map((card) => (
-              <SortableCard key={card.id} card={card} dndReady={dndReady} onOpen={onOpen} onToggleItem={onToggleItem} />
+              <SortableCard key={card.id} card={card} dndReady={dndReady} onOpen={onOpen} />
             ))}
           </SortableContext>
         </div>
@@ -759,13 +731,6 @@ export function KeelBoard() {
                       doneAt: card.doneAt ?? "",
                       checks: card.checks ?? [],
                       list: Boolean(card.checks?.length),
-                    })
-                  }
-                  onToggleItem={(card, itemId) =>
-                    updateCard(card.id, {
-                      checks: (card.checks ?? []).map((item) =>
-                        item.id === itemId ? { ...item, done: !item.done } : item,
-                      ),
                     })
                   }
                   onAdd={(columnId) => {
