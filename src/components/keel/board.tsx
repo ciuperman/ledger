@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type SyntheticEvent } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -350,7 +350,19 @@ function CardEditor({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const canSave = editor.title.trim().length > 0;
+  const canSave =
+    editor.title.trim().length > 0 ||
+    editor.note.trim().length > 0 ||
+    editor.checks.some((item) => item.text.trim().length > 0);
+  const saved = useRef(false);
+
+  function commitSave(event: SyntheticEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (saved.current || !canSave) return;
+    saved.current = true;
+    onSave();
+  }
 
   function toggleList() {
     if (editor.list) {
@@ -382,8 +394,7 @@ function CardEditor({
         aria-labelledby="card-editor-title"
         className="flex min-h-0 w-full flex-1 flex-col bg-card text-card-foreground sm:max-h-[min(40rem,80dvh)] sm:max-w-md sm:flex-none sm:rounded-2xl sm:shadow-[var(--shadow-border)]"
         onSubmit={(event) => {
-          event.preventDefault();
-          if (canSave) onSave();
+          commitSave(event);
         }}
         onMouseDown={(event) => event.stopPropagation()}
       >
@@ -406,8 +417,16 @@ function CardEditor({
               <p className="truncate text-xs text-muted-foreground">{columnTitle}</p>
             ) : null}
           </div>
-          <div className="flex w-16 justify-end">
-            <Button type="submit" variant="ghost" size="sm" disabled={!canSave}>
+          <div className="flex min-w-16 justify-end">
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-11 min-h-11 px-3"
+              disabled={!canSave}
+              onPointerDown={(event) => event.preventDefault()}
+              onPointerUp={commitSave}
+              onClick={commitSave}
+            >
               Save
             </Button>
           </div>
@@ -593,10 +612,15 @@ export function KeelBoard() {
     moveCard(cardId, overColumn, index);
   }
 
+  const ignoreOpen = useRef(0);
+
   function saveEditor() {
     if (!editor) return;
-    const title = editor.title.trim();
+    const fromCheck = editor.checks.find((item) => item.text.trim())?.text.trim() ?? "";
+    const fromNote = editor.note.trim().split("\n")[0]?.trim() ?? "";
+    const title = (editor.title.trim() || fromCheck || fromNote).slice(0, 120);
     if (!title) return;
+    ignoreOpen.current = Date.now() + 600;
     if (editor.mode === "new") {
       const created = addCard(editor.columnId, title, editor.note);
       if (created) {
@@ -721,7 +745,8 @@ export function KeelBoard() {
                   column={column}
                   cards={cardsByCol.get(column.id) ?? []}
                   dndReady={dndReady}
-                  onOpen={(card) =>
+                  onOpen={(card) => {
+                    if (Date.now() < ignoreOpen.current) return;
                     setEditor({
                       mode: "edit",
                       columnId: card.columnId,
@@ -731,8 +756,8 @@ export function KeelBoard() {
                       doneAt: card.doneAt ?? "",
                       checks: card.checks ?? [],
                       list: Boolean(card.checks?.length),
-                    })
-                  }
+                    });
+                  }}
                   onAdd={(columnId) => {
                     const col = columns.find((c) => c.id === columnId);
                     const today = new Date();
